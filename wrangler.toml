@@ -1,0 +1,6 @@
+name = "steward-organizer"
+pages_build_output_dir = "."
+compatibility_date = "2026-10-15"
+
+[ai]
+binding = "AI"
