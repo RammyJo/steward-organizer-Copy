@@ -58,26 +58,12 @@ export async function onRequestPost({ request, env }) {
     return json({ error: "The upload could not be read. Please select the image again." }, 400);
   }
 
-  const imageDataUrl = typeof body.image === "string" ? body.image : "";
-  if (!/^data:image\/(jpeg|jpg|png|webp);base64,/i.test(imageDataUrl)) {
-    return json({ error: "The image is missing or is not a supported image. Upload a JPG, PNG, or WebP photo." }, 400);
+  const image = typeof body.image === "string" ? body.image : "";
+  if (!/^data:image\/(jpeg|jpg|png|webp|gif);base64,/i.test(image)) {
+    return json({ error: "The image is missing or is not a supported image. Upload a JPG, PNG, WebP, or GIF photo." }, 400);
   }
-  if (imageDataUrl.length > MAX_BODY_CHARS - 1000) {
+  if (image.length > MAX_BODY_CHARS - 1000) {
     return json({ error: "This image is too large for one request. Crop the page or upload a smaller photo." }, 413);
-  }
-
-  // Workers AI's Llama vision model expects the raw image bytes as a number
-  // array, not the original data URL/base64 string.
-  let imageBytes;
-  try {
-    const base64 = imageDataUrl.slice(imageDataUrl.indexOf(",") + 1).replace(/\s/g, "");
-    const binary = atob(base64);
-    imageBytes = Array.from(binary, character => character.charCodeAt(0));
-  } catch {
-    return json({ error: "The image data is damaged. Please choose the photo again or upload a fresh crop." }, 400);
-  }
-  if (!imageBytes.length) {
-    return json({ error: "The image appears to be empty. Please choose the photo again." }, 400);
   }
 
   const people = Array.isArray(body.people) ? body.people.map(x => cleanText(x, 80)).filter(Boolean).slice(0, 100) : [];
@@ -126,7 +112,7 @@ Confidence is a conservative estimate of how well this task's title and key deta
   try {
     const output = await env.AI.run(MODEL, {
       prompt: userPrompt,
-      image: imageBytes,
+      image,
       max_tokens: 3000,
       temperature: 0.1
     });
