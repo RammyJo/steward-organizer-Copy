@@ -575,11 +575,19 @@ const STEWARD_PROJECT_SEED = [{"id":"PRJ-002","title":"Covered Court","descripti
         const image = new Image();
         image.onerror = () => reject(new Error('Could not open ' + file.name));
         image.onload = () => {
-          const scale = Math.min(1,1500 / Math.max(image.width,image.height));
+          // Keep enough detail for small, connected handwriting. Only downscale very large photos.
+          const scale = Math.min(1,2200 / Math.max(image.width,image.height));
           const canvas = document.createElement('canvas');
           canvas.width = Math.max(1,Math.round(image.width*scale));
           canvas.height = Math.max(1,Math.round(image.height*scale));
-          try { canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height); resolve(canvas.toDataURL('image/jpeg',0.86)); }
+          try {
+            const ctx = canvas.getContext('2d', { willReadFrequently: false });
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(image,0,0,canvas.width,canvas.height);
+            // High-quality JPEG reduces upload size without aggressively destroying fine pen strokes.
+            resolve(canvas.toDataURL('image/jpeg',0.94));
+          }
           catch(e){reject(e);}
         };
         image.src = reader.result;
@@ -624,7 +632,7 @@ const STEWARD_PROJECT_SEED = [{"id":"PRJ-002","title":"Covered Court","descripti
       }
       notes.textContent = aiNotes + (errs.length ? 'Issues: ' + errs.join(' | ') : '');
       renderSuggestions();
-      status.textContent = suggestions.length ? 'AI found ' + suggestions.length + ' task suggestion(s). Review and edit before importing.' : (errs.length ? 'The image could not be deciphered. Try a closer, clearer photo.' : 'No tasks detected. Try a closer photo.');
+      status.textContent = suggestions.length ? 'AI found ' + suggestions.length + ' task suggestion(s). Review and edit before importing.' : (errs.length ? 'Deciphering failed. Read the detailed error above; if it mentions the AI service or binding, the Cloudflare AI connection needs setup.' : 'The AI returned no actionable tasks. Check the transcription above or upload a closer crop.');
       fileInput.disabled=false;run.disabled=!files.length;importBtn.disabled=!suggestions.length;
     });
     function confidenceScore(value){if(typeof value==='number')return value>1?value/100:value;const v=String(value??'').trim().toLowerCase();const n=Number(v.replace('%',''));if(v&&Number.isFinite(n))return n>1?n/100:n;if(v==='high')return .9;if(v==='medium')return .65;if(v==='low')return .4;return 0;}
