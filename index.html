@@ -567,16 +567,20 @@ const STEWARD_PROJECT_SEED = [{"id":"PRJ-002","title":"Covered Court","descripti
       </div>
       <datalist id="ai-capture-people">${[...new Set(state.tasks.map(t=>t.owner).filter(x=>x && x!=='Unassigned'))].map(n=>`<option value="${esc(n)}"></option>`).join('')}</datalist>`;
   }
+  var AI_CAPTURE_MAX_FILE_BYTES = 8 * 1024 * 1024;
+  var AI_CAPTURE_ACCEPT = ['image/jpeg','image/png','image/webp','image/gif'];
   function optimizeImage(file) {
     return new Promise((resolve,reject) => {
+      if(file && file.size > AI_CAPTURE_MAX_FILE_BYTES){ reject(new Error('Skipped ' + file.name + ': file is over 8MB. Use a smaller photo or crop closer to the writing.')); return; }
+      if(file && file.type && AI_CAPTURE_ACCEPT.indexOf(file.type) === -1){ reject(new Error('Skipped ' + file.name + ': unsupported image type. Use JPG, PNG, WebP, or GIF.')); return; }
       const reader = new FileReader();
       reader.onerror = () => reject(new Error('Could not read ' + file.name));
       reader.onload = () => {
         const image = new Image();
         image.onerror = () => reject(new Error('Could not open ' + file.name));
         image.onload = () => {
-          // Keep enough detail for small, connected handwriting. Only downscale very large photos.
-          const scale = Math.min(1,2200 / Math.max(image.width,image.height));
+          // 1600px keeps small handwriting legible while keeping uploads fast and under AI payload limits.
+          const scale = Math.min(1,1600 / Math.max(image.width,image.height));
           const canvas = document.createElement('canvas');
           canvas.width = Math.max(1,Math.round(image.width*scale));
           canvas.height = Math.max(1,Math.round(image.height*scale));
@@ -585,8 +589,8 @@ const STEWARD_PROJECT_SEED = [{"id":"PRJ-002","title":"Covered Court","descripti
             ctx.imageSmoothingEnabled = true;
             ctx.imageSmoothingQuality = 'high';
             ctx.drawImage(image,0,0,canvas.width,canvas.height);
-            // High-quality JPEG reduces upload size without aggressively destroying fine pen strokes.
-            resolve(canvas.toDataURL('image/jpeg',0.94));
+            // JPEG 0.85 preserves pen strokes while keeping base64 payloads well under function limits.
+            resolve(canvas.toDataURL('image/jpeg',0.85));
           }
           catch(e){reject(e);}
         };
@@ -617,7 +621,7 @@ const STEWARD_PROJECT_SEED = [{"id":"PRJ-002","title":"Covered Court","descripti
     fileInput.addEventListener('change',choose);
     clear.addEventListener('click',() => {fileInput.value='';choose();});
     run.addEventListener('click',async () => {
-      run.disabled=true;fileInput.disabled=true;suggestions=[];const errs=[];let aiNotes='';
+      run.disabled=true;fileInput.disabled=true;suggestions=[];const errs=[];let aiNotes='';let aiTranscriptions='';
       for(let i=0;i<files.length;i++){
         status.textContent = 'Deciphering image ' + (i+1) + ' of ' + files.length + '…';
         try {
@@ -633,10 +637,12 @@ const STEWARD_PROJECT_SEED = [{"id":"PRJ-002","title":"Covered Court","descripti
             throw new Error((data.error || 'AI service returned an error (HTTP ' + response.status + ').') + detail);
           }
           (data.tasks || []).forEach(t => suggestions.push({...t,sourceFile:files[i].name}));
+          if(data.transcription) aiTranscriptions += '--- ' + files[i].name + ' transcription ---\n' + String(data.transcription).slice(0,2000) + '\n';
           if(data.notes) aiNotes += files[i].name + ': ' + data.notes + '\n';
+          if(!(data.tasks||[]).length && !data.transcription) aiNotes += files[i].name + ': no readable text found. Try a closer crop.\n';
         } catch(e) { errs.push(files[i].name + ': ' + String(e.message || e)); }
       }
-      notes.textContent = aiNotes + (errs.length ? 'Issues: ' + errs.join(' | ') : '');
+      notes.textContent = (aiTranscriptions ? aiTranscriptions + '\n' : '') + aiNotes + (errs.length ? 'Issues: ' + errs.join(' | ') : '');
       renderSuggestions();
       status.textContent = suggestions.length ? 'AI found ' + suggestions.length + ' task suggestion(s). Review and edit before importing.' : (errs.length ? 'Deciphering failed. Read the detailed error above; if it mentions the AI service or binding, the Cloudflare AI connection needs setup.' : 'The AI returned no actionable tasks. Check the transcription above or upload a closer crop.');
       fileInput.disabled=false;run.disabled=!files.length;importBtn.disabled=!suggestions.length;
