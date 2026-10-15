@@ -624,8 +624,14 @@ const STEWARD_PROJECT_SEED = [{"id":"PRJ-002","title":"Covered Court","descripti
           const image = await optimizeImage(files[i]);
           const learnedPatterns=JSON.parse(localStorage.getItem('steward-pastor-patterns-v1')||'[]');
           const response = await fetch('/api/decipher',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image,people:[...new Set(state.tasks.map(t=>t.owner).filter(x=>x && x!=='Unassigned'))],pastorPatterns:learnedPatterns,minimumConfidence:0.8,requireHumanVerificationBelow:0.8})});
-          const data = await response.json();
-          if(!response.ok) throw new Error(data.error || 'AI service returned an error.');
+          let data;
+          const rawResponse = await response.text();
+          try { data = JSON.parse(rawResponse); }
+          catch { throw new Error('The decipher endpoint returned a non-JSON response (HTTP ' + response.status + '). Check the Cloudflare deployment and Functions logs.'); }
+          if(!response.ok) {
+            const detail = data.detail ? ' Details: ' + String(data.detail).slice(0,300) : '';
+            throw new Error((data.error || 'AI service returned an error (HTTP ' + response.status + ').') + detail);
+          }
           (data.tasks || []).forEach(t => suggestions.push({...t,sourceFile:files[i].name}));
           if(data.notes) aiNotes += files[i].name + ': ' + data.notes + '\n';
         } catch(e) { errs.push(files[i].name + ': ' + String(e.message || e)); }
