@@ -71,7 +71,6 @@
         <button class="nav-btn" data-page="priorities"><span class="ico" data-icon="activity"></span>Priority List<span class="nav-count" id="priority-count">0</span></button>
         <button class="nav-btn" data-page="accomplishments"><span class="ico" data-icon="check"></span>Accomplishments<span class="nav-count" id="accomplishments-count">0</span></button>
         <button class="nav-btn" data-page="ai-capture"><span class="ico" data-icon="upload"></span>AI Task Capture</button>
-        <button class="nav-btn" data-page="maintenance"><span class="ico" data-icon="tools"></span>Maintenance</button>
         <button class="nav-btn" data-page="reports"><span class="ico" data-icon="chart"></span>Reports</button>
       </nav>
     </div>
@@ -185,7 +184,7 @@ const seedActivity=[
 ];
 function deepCopy(v){return JSON.parse(JSON.stringify(v))}
 const STORAGE_KEY='steward-organizer-prototype-v1';
-let state=loadState();let currentPage='dashboard';let globalSearch='';let taskCategoryFilter='all';let taskFilters={status:'all',department:'all',location:'all',priority:'all'};let projectFilter='all';let currentModal=null;let toastTimer;
+let state=loadState();let currentPage='dashboard';let globalSearch='';let taskFilters={status:'all',department:'all',location:'all',priority:'all'};let projectFilter='all';let currentModal=null;let toastTimer;
 function loadState(){try{const raw=localStorage.getItem(STORAGE_KEY);if(raw){const s=JSON.parse(raw);if(s&&Array.isArray(s.tasks)&&Array.isArray(s.projects))return s}}catch(e){}return {tasks:deepCopy(seedTasks),projects:deepCopy(seedProjects),ideas:deepCopy(seedIdeas),inbox:[],activity:deepCopy(seedActivity),theme:'dark',nextTask:118,nextProject:106,nextIdea:105}}
 function saveState(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state))}catch(e){showToast('Browser storage is full. Export a backup before adding more attachments.')}}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -195,31 +194,105 @@ function priorityClass(p){return 'priority-'+(String(p||'low').toLowerCase())}
 function statusPill(s){return `<span class="pill ${statusClass(s)}">${esc(s)}</span>`}
 function priorityPill(p){return `<span class="pill ${priorityClass(p)}">${esc(p||'Low')}</span>`}
 function getTask(id){return state.tasks.find(t=>t.id===id)}
-function taskCategory(t){
-  const title=String(t.title||'');
+function sectionFor(t){
+  const owner=String(t.owner||'').trim();
+  if(!owner||owner==='Unassigned')return 'Unassigned';
+  const hay=((t.title||'')+' '+String(t.description||'')).toLowerCase();
+  const has=(...words)=>words.some(w=>hay.includes(w));
+  if(has('worship','prayer','bible','disciple','ministry','fellowship','devotion','g12','vbs','easter','youth','kids','evangel','sermon','choir','usher','volunteer','outreach','cell group','baptism','communion','pastor','retreat','camp','revival','discipleship','sunday','sunday school','devotional','teaser','drama clip','christmas'))return 'Discipleship';
+  if(has('speaker','behringer','subwoofer','subs','led','cctv','sound booth','soundbooth','multimedia','projector','microphone','audio','video','camera','amplifier','avr','network switch','tv wire','tv in','cafeteria tv','fun hall tv','computer','laptop','printer','gadget','electronic','wire','wiring','internet','keyboard','monitor','speaker wire'))return 'Multimedia';
+  if(has('admin','paperwork','document','record','permit','license','office','filing','payroll','budget','finance','report','meeting','schedule','roster','announce','regist','database','attendance list','minutes'))return 'Admin';
   const dept=String(t.department||'').trim();
-  if(/\b(speaker|behringer|subwoofer|leds?|cctv|sound ?booth|multimedia|projector|microphone|microphones|audio|video|camera|amplifier|avr|satellite internet|wiring.*sound)\b/i.test(title))return 'Multimedia';
-  if(/\b(worship hall|worshiphall|worship|altar|pulpit|communion|sanctuary)\b/i.test(title))return 'Worship';
-  if(/\b(clean|cleaning|grass|trim plants|organize|reorganize|remove dirt|spray anti|cut grass|scrub|sweep|mop|gardening|landscap|custodian)\b/i.test(title))return 'Custodial';
-  if(/\b(tarp|announcement|camping|encounter|conference|registration|celebration|event|program backdrop|backdrop)\b/i.test(title))return 'Events';
-  if(/\b(admin|paperwork|document|records|permit|license|office supplies|filing|staff schedule|payroll)\b/i.test(title))return 'Administration';
-  if(dept && dept!=='Facilities' && ['Multimedia','Worship','Custodial','Events','Administration','Other'].includes(dept))return dept;
-  if(/\b(unknown|miscellaneous|other|follow.?up|check this|review this)\b/i.test(title))return 'Other';
+  if(dept==='Multimedia')return 'Multimedia';
+  if(dept==='Worship'||dept==='Events')return 'Discipleship';
+  if(dept==='Administration')return 'Admin';
   return 'Facilities';
 }
-const TASK_CATEGORIES=['all','Facilities','Multimedia','Worship','Custodial','Events','Administration','Other'];
-function taskCategoryTabs(){
-  const active=state.tasks.filter(t=>!['Completed','Cancelled'].includes(t.status));
-  const counts=Object.fromEntries(TASK_CATEGORIES.map(c=>[c,c==='all'?active.length:active.filter(t=>taskCategory(t)===c).length]));
-  return `<div class="task-category-tabs" role="tablist" aria-label="Task categories">${TASK_CATEGORIES.map(c=>`<button type="button" class="task-category-tab ${taskCategoryFilter===c?'active':''}" role="tab" aria-selected="${taskCategoryFilter===c?'true':'false'}" data-action="task-category" data-category="${esc(c)}"><span>${c==='all'?'All tasks':esc(c)}</span><span class="task-category-count">${counts[c]}</span></button>`).join('')}</div>`;
+const SECTIONS=[
+  {id:'Facilities',desc:'General building tasks, cleaning, and physical labor'},
+  {id:'Multimedia',desc:'Media, gadgets, and electronics'},
+  {id:'Discipleship',desc:'Spiritual life and discipleship'},
+  {id:'Admin',desc:'Administrative work'},
+  {id:'Unassigned',desc:'Needs an owner assigned'}
+];
+function sectionTasks(section,pool){
+  const list=(pool||[]).filter(t=>sectionFor(t)===section);
+  const rank=new Map((Array.isArray(state.priorityOrder)?state.priorityOrder:[]).map((id,index)=>[id,index]));
+  return list.sort((a,b)=>{
+    const ar=rank.has(a.id)?rank.get(a.id):Number.MAX_SAFE_INTEGER;
+    const br=rank.has(b.id)?rank.get(b.id):Number.MAX_SAFE_INTEGER;
+    return ar-br||state.tasks.indexOf(a)-state.tasks.indexOf(b);
+  });
 }
-function filteredTasks(){let tasks=[...state.tasks];if(taskFilters.status==='all')tasks=tasks.filter(t=>!['Completed','Cancelled'].includes(t.status));if(taskCategoryFilter!=='all')tasks=tasks.filter(t=>taskCategory(t)===taskCategoryFilter);if(globalSearch.trim()){const q=globalSearch.trim().toLowerCase();tasks=tasks.filter(t=>[t.title,t.description,t.department,t.location,t.project,t.owner,t.id,(t.tags||[]).join(' ')].join(' ').toLowerCase().includes(q))}if(taskFilters.status!=='all')tasks=tasks.filter(t=>t.status===taskFilters.status);if(taskFilters.department!=='all')tasks=tasks.filter(t=>t.department===taskFilters.department);if(taskFilters.location!=='all')tasks=tasks.filter(t=>t.location===taskFilters.location);if(taskFilters.priority!=='all')tasks=tasks.filter(t=>t.priority===taskFilters.priority);if(projectFilter!=='all')tasks=tasks.filter(t=>t.project===projectFilter);return tasks}
+function saveSectionOrder(newIds,sectionName,taskTitle){
+  const set=new Set(newIds);
+  const stillKnown=new Set(state.tasks.map(t=>t.id));
+  const prev=(Array.isArray(state.priorityOrder)?state.priorityOrder:state.tasks.map(t=>t.id)).filter(id=>stillKnown.has(id));
+  const firstPos=prev.findIndex(id=>set.has(id));
+  const rest=prev.filter(id=>!set.has(id));
+  const at=firstPos<0?rest.length:firstPos;
+  rest.splice(Math.max(0,Math.min(at,rest.length)),0,...newIds.filter(id=>stillKnown.has(id)));
+  state.priorityOrder=rest;
+  saveState();
+  addActivity('Reordered the '+sectionName+' section'+(taskTitle?' ('+taskTitle+')':'')+'.','activity');
+  renderPage();
+  showToast('Order saved.');
+}
+function moveSectionTask(id,delta,section){
+  const ids=sectionTasks(section,filteredTasks()).map(t=>t.id);
+  const from=ids.indexOf(id),to=from+delta;
+  if(from<0||to<0||to>=ids.length)return;
+  [ids[from],ids[to]]=[ids[to],ids[from]];
+  saveSectionOrder(ids,section,getTask(id)?.title||'');
+}
+function bindSectionLists(root){
+  root.querySelectorAll('[data-section-list]').forEach(list=>{
+    const section=list.dataset.sectionList;
+    let draggedId=null;
+    list.addEventListener('dragstart',e=>{
+      const grip=e.target.closest('[data-task-grip]');if(!grip){e.preventDefault();return;}
+      draggedId=grip.dataset.taskGrip;
+      const row=grip.closest('[data-task-id]');if(row)row.classList.add('priority-is-dragging');
+      if(e.dataTransfer){e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',draggedId);}
+    });
+    list.addEventListener('dragover',e=>{
+      if(!draggedId)return;
+      const row=e.target.closest('[data-task-id]');if(!row||row.dataset.taskId===draggedId)return;
+      e.preventDefault();if(e.dataTransfer)e.dataTransfer.dropEffect='move';
+      list.querySelectorAll('.priority-drop-before,.priority-drop-after').forEach(x=>x.classList.remove('priority-drop-before','priority-drop-after'));
+      const r=row.getBoundingClientRect();
+      row.classList.add(e.clientY>r.top+r.height/2?'priority-drop-after':'priority-drop-before');
+    });
+    list.addEventListener('drop',e=>{
+      const target=e.target.closest('[data-task-id]');if(!draggedId||!target)return;
+      e.preventDefault();
+      const sourceId=draggedId,targetId=target.dataset.taskId;
+      list.querySelectorAll('.priority-is-dragging,.priority-drop-before,.priority-drop-after').forEach(x=>x.classList.remove('priority-is-dragging','priority-drop-before','priority-drop-after'));
+      draggedId=null;if(sourceId===targetId)return;
+      const ids=sectionTasks(section,filteredTasks()).map(t=>t.id);
+      const from=ids.indexOf(sourceId),at=ids.indexOf(targetId);if(from<0||at<0)return;
+      const r=target.getBoundingClientRect();
+      const after=e.clientY>r.top+r.height/2;
+      const [moved]=ids.splice(from,1);
+      let insertAt=at+(after?1:0);if(from<insertAt)insertAt--;
+      ids.splice(Math.max(0,Math.min(insertAt,ids.length)),0,moved);
+      saveSectionOrder(ids,section,getTask(sourceId)?.title||sourceId);
+    });
+    list.addEventListener('dragend',()=>{draggedId=null;list.querySelectorAll('.priority-is-dragging,.priority-drop-before,.priority-drop-after').forEach(x=>x.classList.remove('priority-is-dragging','priority-drop-before','priority-drop-after'));});
+    list.addEventListener('click',e=>{
+      const move=e.target.closest('[data-task-move]');
+      if(move){e.preventDefault();e.stopPropagation();moveSectionTask(move.dataset.id,move.dataset.taskMove==='up'?-1:1,section);return;}
+      if(e.target.closest('[data-task-grip]')){e.stopPropagation();return;}
+    },true);
+  });
+}
+function filteredTasks(){let tasks=[...state.tasks];if(taskFilters.status==='all')tasks=tasks.filter(t=>!['Completed','Cancelled'].includes(t.status));if(globalSearch.trim()){const q=globalSearch.trim().toLowerCase();tasks=tasks.filter(t=>[t.title,t.description,t.department,t.location,t.project,t.owner,t.id,(t.tags||[]).join(' ')].join(' ').toLowerCase().includes(q))}if(taskFilters.status!=='all')tasks=tasks.filter(t=>t.status===taskFilters.status);if(taskFilters.department!=='all')tasks=tasks.filter(t=>t.department===taskFilters.department);if(taskFilters.location!=='all')tasks=tasks.filter(t=>t.location===taskFilters.location);if(taskFilters.priority!=='all')tasks=tasks.filter(t=>t.priority===taskFilters.priority);if(projectFilter!=='all')tasks=tasks.filter(t=>t.project===projectFilter);return tasks}
 function activeCount(){return state.tasks.filter(t=>!['Completed','Cancelled'].includes(t.status)).length}
 function tasksOverdue(){const today=new Date();today.setHours(0,0,0,0);return state.tasks.filter(t=>t.dueDate&&!['Completed','Cancelled'].includes(t.status)&&new Date(t.dueDate+'T00:00:00')<today).length}
 function addActivity(text,type='activity'){state.activity.unshift({id:'A-'+Date.now(),text,actor:'Workspace admin',when:'Just now',type});state.activity=state.activity.slice(0,30);saveState()}
 function updateNavCounts(){document.getElementById('inbox-count').textContent=state.inbox.filter(x=>x.status!=='Archived').length;document.getElementById('ideas-count').textContent=state.ideas.filter(x=>x.status==='Proposed').length;document.getElementById('tasks-count').textContent=state.tasks.filter(t=>!['Completed','Cancelled'].includes(t.status)).length;const pc=document.getElementById('priority-count');if(pc)pc.textContent=state.tasks.filter(t=>!['Completed','Cancelled'].includes(t.status)).length;const ac=document.getElementById('accomplishments-count');if(ac)ac.textContent=state.tasks.filter(t=>t.status==='Completed').length}
 function setTheme(theme){state.theme=theme;document.documentElement.dataset.theme=theme;document.querySelector('meta[name="theme-color"]').content=theme==='dark'?'#111923':'#e0e8f0';const el=document.getElementById('theme-toggle');el.innerHTML=icon(theme==='dark'?'sun':'moon',18);el.title=theme==='dark'?'Switch to light mode':'Switch to dark mode';el.setAttribute('aria-label',el.title);saveState()}
-function navigate(page){if(page==='projects'||page==='locations')page='tasks';currentPage=page;projectFilter='all';if(page==='tasks')taskCategoryFilter='all';document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===page));document.getElementById('breadcrumb').textContent=({dashboard:'Dashboard',inbox:'Inbox',ideas:'Ideas & proposals',tasks:'All tasks',priorities:'Priority list',maintenance:'Maintenance',reports:'Reports',admin:'Administration'})[page]||'Dashboard';document.getElementById('sidebar').classList.remove('open');document.getElementById('mobile-shade').classList.remove('show');renderPage();window.scrollTo({top:0,behavior:'smooth'})}
+function navigate(page){if(page==='projects'||page==='locations')page='tasks';currentPage=page;projectFilter='all';document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===page));document.getElementById('breadcrumb').textContent=({dashboard:'Dashboard',inbox:'Inbox',ideas:'Ideas & proposals',tasks:'All tasks',priorities:'Priority list',reports:'Reports',admin:'Administration'})[page]||'Dashboard';document.getElementById('sidebar').classList.remove('open');document.getElementById('mobile-shade').classList.remove('show');renderPage();window.scrollTo({top:0,behavior:'smooth'})}
 function pageHead(eyebrow,title,desc,actions=''){return `<div class="page-head"><div><div class="eyebrow">${eyebrow}</div><h1 class="page-title">${title}</h1><p class="page-description">${desc}</p></div><div class="head-actions">${actions}</div></div>`}
 function btn(text,action,cls='btn',ico=''){return `<button class="${cls}" data-action="${action}">${ico?icon(ico,15):''}${text}</button>`}
 function noData(title,desc,button=''){return `<div class="empty-state"><div class="empty-icon">${icon('inbox',21)}</div><strong>${title}</strong><p>${desc}</p>${button}</div>`}
@@ -253,22 +326,30 @@ function renderTasksPage(){
  const review=state.tasks.filter(t=>t.status==='Needs review').length;
  const done=state.tasks.filter(t=>t.status==='Completed').length;
  const actions=btn('New task','new-task','btn btn-primary','plus');
- return `${pageHead('WORK MANAGEMENT','All tasks','One task register. Use the category tabs to switch between Facilities, Multimedia, and other teams.',actions)}
+ return `${pageHead('WORK MANAGEMENT','All tasks','One task register, grouped by team. Drag tasks within a section to rank them by urgency — top means most urgent.',actions)}
  ${globalSearchPreamble()}
  <div class="task-count-summary">
    <div><span class="task-count-label">Active tasks</span><strong>${total}</strong></div>
    <div><span class="task-count-label">Needs review</span><strong>${review}</strong></div>
    <div><span class="task-count-label">Unassigned</span><strong>${state.tasks.filter(t=>!['Completed','Cancelled'].includes(t.status)&&(!t.owner||t.owner==='Unassigned')).length}</strong></div>
  </div>
- ${taskCategoryTabs()}
  <div class="filters" style="margin-bottom:14px">${selectFilter('filter-status','Status',['Needs review','Proposed','Ready','In progress','Blocked','On hold','Completed','Cancelled'],taskFilters.status)}${selectFilter('filter-location','Location',uniqueVals('location'),taskFilters.location)}${selectFilter('filter-priority','Priority',['High','Medium','Low'],taskFilters.priority)}<span style="color:var(--muted);font-size:11px;margin-left:auto">${tasks.length} matching record${tasks.length===1?'':'s'}</span></div>
  ${projectFilter!=='all'?`<div class="callout" style="margin-bottom:12px">${icon('folder',17)}<div>Filtered to project <strong>${esc(projectFilter)}</strong>.</div>${btn('Clear project filter','clear-project','btn btn-ghost btn-sm')}</div>`:''}
- ${renderTaskTable(tasks)}
+  ${SECTIONS.map(s=>{
+    const items=sectionTasks(s.id,tasks);
+    return `<div class="section-title-row" style="margin-top:18px"><div><h2 class="section-title">${esc(s.id)}</h2><div class="panel-subtitle">${esc(s.desc)} · ${items.length} task${items.length===1?'':'s'}</div></div><span class="tag">Top = most urgent</span></div>`
+    +(items.length?`<div class="priority-list" data-section-list="${esc(s.id)}">${items.map((t,i)=>`<article class="priority-item" data-task-id="${esc(t.id)}" data-action="task-detail" data-id="${esc(t.id)}">
+      <div class="priority-rank">${i+1}<span>${i===0?'Top':i===items.length-1?'Bottom':'Rank'}</span></div>
+      <button type="button" class="priority-grip" draggable="true" data-task-grip="${esc(t.id)}" aria-label="Drag ${esc(t.title)} to reorder" title="Drag to reorder">⠿</button>
+      <div class="priority-main"><div class="priority-task-name">${esc(t.title)}</div><div class="task-meta"><span>${esc(t.id)}</span><span class="meta-dot"></span><span>${esc(t.location||'Unknown')}</span><span class="meta-dot"></span><span>${esc(t.owner||'Unassigned')}</span>${t.dueDate?`<span class="meta-dot"></span><span>Due ${esc(formatDate(t.dueDate))}</span>`:''}</div></div>
+      <div class="priority-side">${priorityPill(t.priority)}${statusPill(t.status)}</div>
+      <div class="priority-actions"><button type="button" class="priority-move" data-task-move="up" data-id="${esc(t.id)}" aria-label="Move ${esc(t.title)} up" title="Move up" ${i===0?'disabled':''}>↑</button><button type="button" class="priority-move" data-task-move="down" data-id="${esc(t.id)}" aria-label="Move ${esc(t.title)} down" title="Move down" ${i===items.length-1?'disabled':''}>↓</button></div>
+    </article>`).join('')}</div>`:`<div class="panel" style="padding:13px 15px;color:var(--muted);font-size:12px">No tasks in this section. Drag tasks here is not needed — new matching tasks appear automatically.</div>`);
+  }).join('')}
  <div class="source-note">Counts are calculated from the records currently in this browser. Imported workbook entries stay visible as “Needs review” until their real status is confirmed; that is different from confirmed pending work. Source rows and notes are retained for reconciliation.</div>`;
 }
 function renderProjectsPage(){const q=globalSearch.trim().toLowerCase();const projects=state.projects.filter(p=>!q||[p.name,p.description,p.location,p.department,p.status,p.lead].join(' ').toLowerCase().includes(q));return `${pageHead('WORK MANAGEMENT','Projects','Group related tasks into initiatives with a shared outcome, lead, and progress view.',btn('New project','new-project','btn btn-primary','plus'))}${globalSearchPreamble()}<div class="grid cards-grid">${projects.length?projects.map(p=>{const linked=(p.tasks||[]).map(getTask).filter(Boolean);return `<article class="panel project-card"><div class="card-top"><span class="location-mark">${icon('folder',18)}</span>${statusPill(p.status)}</div><div><div class="card-title">${esc(p.name)}</div><div class="card-description" style="margin-top:6px">${esc(p.description)}</div></div><div class="tag-row"><span class="tag">${esc(p.department)}</span><span class="tag">${esc(p.location)}</span><span class="tag">${linked.length} linked tasks</span></div><div class="progress-track"><div class="progress-bar" style="width:${projectProgress(p)}%"></div></div><div class="card-foot"><div class="mini-meta">${icon('user',13)} ${esc(p.lead||'Unassigned')}</div><span style="display:flex;gap:6px"><button class="btn btn-sm" data-action="edit-project" data-id="${esc(p.id)}">Edit</button><button class="btn btn-sm" data-action="project-tasks" data-id="${esc(p.id)}">Tasks ${icon('arrow',13)}</button></span></div></article>`}).join(''):noData('No projects found','Create a new project or change your search.',btn('New project','new-project','btn btn-sm btn-primary','plus'))}</div>`}
 function renderIdeasPage(){const q=globalSearch.trim().toLowerCase();const ideas=state.ideas.filter(i=>!q||[i.title,i.description,i.department,i.location,(i.tags||[]).join(' ')].join(' ').toLowerCase().includes(q));return `${pageHead('CAPTURE & DISCOVERY','Ideas & proposals','Keep possible improvements separate from approved work. Convert an idea only when someone decides to act on it.',btn('Add an idea','new-idea','btn btn-primary','plus'))}${globalSearchPreamble()}<div class="grid cards-grid">${ideas.length?ideas.map(i=>`<article class="panel idea-card"><div class="card-top"><span class="idea-mark">${icon('bulb',18)}</span>${statusPill(i.status||'Proposed')}</div><div><div class="card-title">${esc(i.title)}</div><div class="card-description" style="margin-top:6px">${esc(i.description)}</div></div><div class="tag-row">${(i.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(i.location)}</span></div><div class="card-foot"><span class="mini-meta">${esc(i.department)} · ${esc(i.source||'Manual')}</span><button class="btn btn-sm" data-action="idea-detail" data-id="${esc(i.id)}">Review ${icon('arrow',13)}</button></div></article>`).join(''):noData('No ideas found','Capture a proposal before it becomes an assignment.',btn('Add an idea','new-idea','btn btn-sm btn-primary','plus'))}</div>`}
-function renderMaintenancePage(){const tasks=state.tasks.filter(t=>t.type==='Maintenance'&&(!globalSearch.trim()||[t.title,t.description,t.location,t.department].join(' ').toLowerCase().includes(globalSearch.trim().toLowerCase())));return `${pageHead('RECURRING & SITE CARE','Maintenance','Repairs, inspections, and recurring checklists use the same task records as every other team.',btn('New maintenance task','new-maintenance','btn btn-primary','plus'))}<div class="callout" style="margin-bottom:16px">${icon('refresh',18)}<div><strong>Planned recurring schedule.</strong><br>Frequency and next-run dates should be confirmed with the facilities lead. The records below are migrated suggestions, not confirmed current work.</div></div><div class="section-title-row"><h2 class="section-title">Maintenance register</h2><span style="color:var(--muted);font-size:11px">${tasks.length} records</span></div>${renderTaskTable(tasks)}`}
 const locationList=[{name:'CC',full:'Champions Community',kind:'Site'},{name:'CEC',full:'CEC building',kind:'Site'},{name:'CA',full:'Champions Academy',kind:'Site'},{name:'SFCC',full:'SFCC',kind:'Site'},{name:'West Lot',full:'West Lot / west land',kind:'Outdoor area'},{name:'Northwing',full:'Northwing rooms',kind:'Building area'},{name:'Multiple locations',full:'Cross-site work',kind:'Multi-site'}];
 function renderLocationsPage(){const deps=[...new Set([...state.tasks.map(t=>t.department),'Multimedia','Worship'].filter(Boolean))];const allLocs=[...new Set([...locationList.map(l=>l.name),...state.tasks.map(t=>t.location).filter(Boolean)])];const q=globalSearch.trim().toLowerCase();const rows=[...locationList.map(l=>({name:l.name,full:l.full,kind:l.kind})),...deps.map(d=>({name:d,full:d+' department',kind:'Department'}))].filter((x,i,a)=>a.findIndex(y=>y.kind===x.kind&&y.name===x.name)===i).filter(x=>!q||[x.name,x.full,x.kind].join(' ').toLowerCase().includes(q));return `${pageHead('ORGANIZATION','Locations & teams','Browse one source of work by building, room, site, or department. This is a view over tasks, not a separate task list.',btn('New task','new-task','btn btn-primary','plus'))}<div class="grid cards-grid">${rows.map(x=>{const related=state.tasks.filter(t=>x.kind==='Department'?t.department===x.name:t.location.includes(x.name)|| (x.name==='West Lot'&&t.location.includes('West')));return `<article class="panel location-card"><div class="card-top"><span class="location-mark">${icon(x.kind==='Department'?'users':'building',18)}</span><span class="tag">${esc(x.kind)}</span></div><div><div class="card-title">${esc(x.name)}</div><div class="card-description" style="margin-top:5px">${esc(x.full)}</div></div><div class="card-foot"><div class="mini-meta">${icon('check-square',13)} ${related.length} related records</div><button class="btn btn-sm" data-action="location-tasks" data-name="${esc(x.name)}" data-kind="${esc(x.kind)}">Open ${icon('arrow',13)}</button></div></article>`}).join('')}</div><div class="source-note">Department names and hashtag meanings are configurable in Administration. Additional teams can be added after the source process is confirmed.</div>`}
 function renderReportsPage(){const all=state.tasks;const tasks=all.filter(t=>!['Completed','Cancelled'].includes(t.status));const statuses=['Needs review','Proposed','Ready','In progress','Blocked','On hold'];const depts=[...new Set(tasks.map(t=>t.department))];const maximum=Math.max(1,...statuses.map(s=>tasks.filter(t=>t.status===s).length));const maxDept=Math.max(1,...depts.map(d=>tasks.filter(t=>t.department===d).length));const completed=all.filter(t=>t.status==='Completed').length;const pct=(tasks.length+completed)?Math.round(completed/(tasks.length+completed)*100):0;return `${pageHead('VISIBILITY & FOLLOW-THROUGH','Reports','Active work is counted separately from the completed archive.',btn('Export backup','export-data','btn btn-primary','file'))}<div class="grid stats-grid"><div class="panel stat-card"><div class="stat-top"><span class="stat-label">Active tasks</span><span class="stat-icon">${icon('check-square')}</span></div><div class="stat-value">${tasks.length}</div><div class="stat-foot">Completed and cancelled tasks excluded</div></div><div class="panel stat-card"><div class="stat-top"><span class="stat-label">Completed</span><span class="stat-icon" style="color:var(--success)">${icon('check')}</span></div><div class="stat-value">${completed}</div><div class="stat-foot">Verified as complete in this prototype</div></div><div class="panel stat-card"><div class="stat-top"><span class="stat-label">Overdue</span><span class="stat-icon" style="color:var(--coral)">${icon('calendar')}</span></div><div class="stat-value">${tasksOverdue()}</div><div class="stat-foot">Requires a due date to calculate</div></div><div class="panel stat-card"><div class="stat-top"><span class="stat-label">Completion rate</span><span class="stat-icon">${icon('chart')}</span></div><div class="stat-value">${pct}%</div><div class="stat-foot">Completed / active plus completed tasks</div></div></div><div class="grid report-grid"><section class="panel"><div class="panel-head"><div><h2 class="panel-title">Work by status</h2><div class="panel-subtitle">Based on current status field.</div></div></div><div class="panel-body"><div class="bar-list">${statuses.map(s=>{const count=tasks.filter(t=>t.status===s).length;return `<div class="bar-row"><span class="bar-label">${esc(s)}</span><div class="bar-track"><div class="bar-fill" style="width:${count/maximum*100}%;background:${s==='Needs review'?'var(--warning)':s==='Blocked'?'var(--coral)':s==='Completed'?'var(--success)':'var(--primary)'}"></div></div><span class="bar-count">${count}</span></div>`}).join('')}</div></div></section><section class="panel"><div class="panel-head"><div><h2 class="panel-title">Work by department</h2><div class="panel-subtitle">Assignments currently registered.</div></div></div><div class="panel-body"><div class="bar-list">${depts.map(d=>{const count=tasks.filter(t=>t.department===d).length;return `<div class="bar-row"><span class="bar-label">${esc(d)}</span><div class="bar-track"><div class="bar-fill" style="width:${count/maxDept*100}%"></div></div><span class="bar-count">${count}</span></div>`}).join('')}</div><div class="source-note">Reports will become organization-wide only after authentication and shared cloud storage are implemented.</div></div></section></div><div class="callout section-gap">${icon('alert',18)}<div><strong>Data quality matters.</strong><br>Many imported workbook records are intentionally marked “Needs review.” Do not interpret the current chart as actual organizational performance until people in charge, duplicate records, and statuses are verified.</div></div>`}
@@ -353,7 +434,7 @@ function bindPriorityList(root){
     const grip=e.target.closest('[data-priority-grip]');if(!grip){const row=e.target.closest('[data-priority-id]');if(row)openTaskDetail(row.dataset.priorityId);}
   });
 }
-function renderPage(){const root=document.getElementById('page-content');const renderers={dashboard:renderDashboard,inbox:renderInboxPage,ideas:renderIdeasPage,tasks:renderTasksPage,priorities:renderPriorityPage,maintenance:renderMaintenancePage,reports:renderReportsPage,admin:renderAdminPage};root.innerHTML=(renderers[currentPage]||renderDashboard)();updateNavCounts();root.querySelectorAll('[data-icon]').forEach(el=>el.innerHTML=icon(el.dataset.icon,18));if(currentPage==='priorities')bindPriorityList(root);}
+function renderPage(){const root=document.getElementById('page-content');const renderers={dashboard:renderDashboard,inbox:renderInboxPage,ideas:renderIdeasPage,tasks:renderTasksPage,priorities:renderPriorityPage,reports:renderReportsPage,admin:renderAdminPage};root.innerHTML=(renderers[currentPage]||renderDashboard)();updateNavCounts();root.querySelectorAll('[data-icon]').forEach(el=>el.innerHTML=icon(el.dataset.icon,18));if(currentPage==='priorities')bindPriorityList(root);if(currentPage==='tasks')bindSectionLists(root);}
 function formatDate(iso){if(!iso)return 'Not set';const d=new Date(iso+'T00:00:00');if(Number.isNaN(d.getTime()))return iso;return d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}
 function todayISO(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
 function openModal(title,subtitle,body,footer='',wide=false){const root=document.getElementById('modal-root');root.innerHTML=`<div class="modal-backdrop" data-action="close-backdrop"><div class="modal ${wide?'wide':''}" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="modal-head"><div><h2 class="modal-title">${esc(title)}</h2><div class="modal-subtitle">${esc(subtitle||'')}</div></div><button class="icon-btn" data-action="close-modal" aria-label="Close">${icon('close',17)}</button></div><div class="modal-body">${body}</div>${footer?`<div class="modal-foot">${footer}</div>`:''}</div></div>`;currentModal=title;root.querySelector('.modal-backdrop').addEventListener('click',e=>{if(e.target.classList.contains('modal-backdrop'))closeModal()});root.querySelectorAll('[data-icon]').forEach(el=>el.innerHTML=icon(el.dataset.icon,17));}
@@ -383,7 +464,7 @@ document.getElementById('theme-toggle').addEventListener('click',()=>setTheme(st
 document.getElementById('quick-upload').addEventListener('click',()=>newNoteModal(false));
 document.getElementById('mobile-menu').addEventListener('click',()=>{document.getElementById('sidebar').classList.add('open');document.getElementById('mobile-shade').classList.add('show')});document.getElementById('mobile-shade').addEventListener('click',()=>{document.getElementById('sidebar').classList.remove('open');document.getElementById('mobile-shade').classList.remove('show')});
 document.addEventListener('change',e=>{if(e.target.id==='filter-status')taskFilters.status=e.target.value;if(e.target.id==='filter-department')taskFilters.department=e.target.value;if(e.target.id==='filter-location')taskFilters.location=e.target.value;if(e.target.id==='filter-priority')taskFilters.priority=e.target.value;if(['filter-status','filter-department','filter-location','filter-priority'].includes(e.target.id))renderPage();if(e.target.id==='restore-file')restoreData(e.target.files?.[0])});
-document.addEventListener('click',e=>{const el=e.target.closest('[data-action]');if(!el)return;const a=el.dataset.action;const id=el.dataset.id;if(a==='close-modal'){closeModal();return}if(a==='task-category'){taskCategoryFilter=el.dataset.category||'all';renderPage();return}if(a==='new-task'){taskForm();return}if(a==='new-maintenance'){taskForm(null,'maintenance');return}if(a==='edit-task'){taskForm(getTask(id));return}if(a==='task-detail'){openTaskDetail(id);return}if(a==='delete-task-confirm'){confirmDeleteTask(id);return}if(a==='new-project'){projectForm();return}if(a==='edit-project'){const p=state.projects.find(p=>p.id===id);if(p)projectForm(p);return}if(a==='new-idea'){ideaForm();return}if(a==='idea-detail'){ideaDetail(id);return}if(a==='promote-idea'){promoteIdea(id);return}if(a==='upload-notes'){newNoteModal(false);return}if(a==='typed-note'){newNoteModal(true);return}if(a==='inbox-review'){inboxReview(id);return}if(a==='transcribe-note'){const n=state.inbox.find(x=>x.id===id);if(n){closeModal();transcriptionModal(n)}return}if(a==='project-tasks'){viewProjectTasks(id);return}if(a==='location-tasks'){viewLocationTasks(el.dataset.name,el.dataset.kind);return}if(a==='go-tasks'){navigate('tasks');return}if(a==='go-inbox'){navigate('inbox');return}if(a==='go-projects'){navigate('projects');return}if(a==='refresh-priority-list'){if(Array.isArray(state.priorityOrder)){const ordered=priorityTasks().map(t=>t.id);state.priorityOrder=ordered.concat(state.priorityOrder.filter(id=>!ordered.includes(id)));saveState()}renderPage();showToast('Priority list refreshed.');return}if(a==='clear-project'){projectFilter='all';renderPage();return}if(a==='export-data'){exportData();return}if(a==='reset-data'){resetData();return}if(a==='new-tag'){newTagModal();return}if(a==='close-backdrop'&&e.target===el){closeModal();return}});
+document.addEventListener('click',e=>{const el=e.target.closest('[data-action]');if(!el)return;const a=el.dataset.action;const id=el.dataset.id;if(a==='close-modal'){closeModal();return}if(a==='new-task'){taskForm();return}if(a==='edit-task'){taskForm(getTask(id));return}if(a==='task-detail'){openTaskDetail(id);return}if(a==='delete-task-confirm'){confirmDeleteTask(id);return}if(a==='new-project'){projectForm();return}if(a==='edit-project'){const p=state.projects.find(p=>p.id===id);if(p)projectForm(p);return}if(a==='new-idea'){ideaForm();return}if(a==='idea-detail'){ideaDetail(id);return}if(a==='promote-idea'){promoteIdea(id);return}if(a==='upload-notes'){newNoteModal(false);return}if(a==='typed-note'){newNoteModal(true);return}if(a==='inbox-review'){inboxReview(id);return}if(a==='transcribe-note'){const n=state.inbox.find(x=>x.id===id);if(n){closeModal();transcriptionModal(n)}return}if(a==='project-tasks'){viewProjectTasks(id);return}if(a==='location-tasks'){viewLocationTasks(el.dataset.name,el.dataset.kind);return}if(a==='go-tasks'){navigate('tasks');return}if(a==='go-inbox'){navigate('inbox');return}if(a==='go-projects'){navigate('projects');return}if(a==='refresh-priority-list'){if(Array.isArray(state.priorityOrder)){const ordered=priorityTasks().map(t=>t.id);state.priorityOrder=ordered.concat(state.priorityOrder.filter(id=>!ordered.includes(id)));saveState()}renderPage();showToast('Priority list refreshed.');return}if(a==='clear-project'){projectFilter='all';renderPage();return}if(a==='export-data'){exportData();return}if(a==='reset-data'){resetData();return}if(a==='new-tag'){newTagModal();return}if(a==='close-backdrop'&&e.target===el){closeModal();return}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();document.getElementById('global-search').focus()}});
 setTheme(state.theme||'dark');renderPage();
 </script>
