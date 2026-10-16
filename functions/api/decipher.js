@@ -149,12 +149,22 @@ function tryParseModelJson(text) {
  * derive conservative low-confidence task candidates from bullet/numbered
  * lines. Never invents details; marks everything for human review.
  */
+const PLAINTEXT_SKIP = /^(sure\b|of course\b|here(?:'s| is| are)\b|i can\b|i(?:'ll| will)\b|as an ai\b|the image (shows|contains|appears|seems)\b|these tasks\b|it'?s worth noting\b|however,|based on the\b|unfortunately\b|please note\b|in (this|the) image\b)/i;
+
 function tasksFromPlainText(text) {
   const transcription = cleanText(text, 5000);
   const lines = String(text || "")
     .split(/\r?\n/)
-    .map(l => l.replace(/^[\s>]*([-*•\d.)\]]+\s+)/, "").trim())
+    .map(l => l
+      .replace(/^[\s>]*([-*•\d.)\]]+\s+)/, "")
+      .replace(/[*_`#]+/g, "")
+      .trim())
     .filter(l => l.length >= 12 && l.length <= 220)
+    .filter(l => !PLAINTEXT_SKIP.test(l))
+    .filter(l => !/:$/.test(l))
+    .filter(l => !/^(transcription|tasks?|notes?)\s*:?$/i.test(l))
+    .filter(l => !/^[\W_]+$/.test(l))
+    .filter(l => !/^\{/.test(l))
     .filter(l => !/^as an? ai\b/i.test(l))
     .slice(0, 10);
   const tasks = lines.map(line => ({
@@ -383,11 +393,12 @@ Confidence is a conservative estimate of how well this task's title and key deta
             { role: "system", content: system },
             {
               role: "user",
-              content: "Convert this transcription of a handwritten church operations note into the required JSON shape (notes, transcription, tasks). Do not invent tasks. Transcription:\n\n" + fallback.transcription.slice(0, 4000)
+              content: "Convert this transcription of a handwritten church operations note into the required JSON shape (notes, transcription, tasks) and return ONLY that JSON, no explanations and no markdown fences. Do not invent tasks. Transcription:\n\n" + fallback.transcription.slice(0, 4000)
             }
           ],
+          response_format: { type: "json_object" },
           max_tokens: 2000,
-          temperature: 0.1
+          temperature: 0
         });
         const stage2Text = extractModelText(structuring);
         const stage2 = tryParseModelJson(stage2Text);
