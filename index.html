@@ -743,18 +743,24 @@ const STEWARD_PROJECT_SEED = [{"id":"PRJ-002","title":"Covered Court","descripti
   } catch(e) {}
   // Import the full Projects worksheet once. Every source row is preserved with its
   // site, assignees, and free-form status/progress text. We do not guess completion.
+  // The curated Facilities + Multimedia registers replaced the old Projects-worksheet import.
+  // Purge those superseded rows once and never re-import them.
   try {
-    const projectImportKey = 'steward-projects-sheet-imported-v2';
-    if (localStorage.getItem(projectImportKey) !== 'done' || STEWARD_PROJECT_SEED.some(projectTask => !state.tasks.some(t => t.id === projectTask.id))) {
-      for (const projectTask of STEWARD_PROJECT_SEED) {
-        if (!state.tasks.some(t => t.id === projectTask.id)) state.tasks.push(projectTask);
+    if (localStorage.getItem('steward-projects-sheet-removed-v1') !== 'done') {
+      const before = state.tasks.length;
+      state.tasks = state.tasks.filter(t => !(t && (t.sourceSheet === 'Projects' || String(t.id || '').startsWith('PRJ-'))));
+      if (state.tasks.length !== before) {
+        if (Array.isArray(state.priorityOrder)) {
+          const alive = new Set(state.tasks.map(t => t.id));
+          state.priorityOrder = state.priorityOrder.filter(id => alive.has(id));
+        }
+        saveState();
+        addActivity('Removed ' + (before - state.tasks.length) + ' superseded Projects-worksheet rows; the curated registers are now the task list.', 'activity');
       }
-      // Save the records first, then mark the import complete to allow retry if storage fails.
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      localStorage.setItem(projectImportKey, 'done');
+      localStorage.setItem('steward-projects-sheet-removed-v1', 'done');
     }
   } catch (e) {
-    console.error('Projects worksheet import could not be saved.', e);
+    console.error('Projects worksheet cleanup could not be saved.', e);
   }
   updateNavCounts();
   const originalNavigate = navigate;
