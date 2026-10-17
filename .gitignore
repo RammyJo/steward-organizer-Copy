@@ -9,3 +9,6 @@ npm-debug.log*
 # OS cruft
 Thumbs.db
 .DS_Store
+
+# temporary script-extraction artifacts from syntax checks
+app*.js

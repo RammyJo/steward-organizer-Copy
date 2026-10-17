@@ -23,6 +23,9 @@ setTimeout(() => {
   const allRows = doc.querySelectorAll('[data-section-list] [data-task-id]');
   check('All view renders 204 rows', allRows.length === 204, 'got ' + allRows.length);
   check('All badge = 204', tabs[0].querySelector('.segment-count').textContent === '204', tabs[0].querySelector('.segment-count').textContent);
+  check('Facilities tab badge = 101', tabs.find(b => b.dataset.section === 'Facilities').querySelector('.segment-count').textContent === '101');
+  check('Multimedia tab badge = 103', tabs.find(b => b.dataset.section === 'Multimedia').querySelector('.segment-count').textContent === '103');
+  check('no task falls into Unassigned by department', tabs.find(b => b.dataset.section === 'Unassigned').querySelector('.segment-count').textContent === '0');
 
   const mmTab = tabs.find(b => b.dataset.section === 'Multimedia');
   const mmBadge = parseInt(mmTab.querySelector('.segment-count').textContent, 10);
@@ -36,10 +39,11 @@ setTimeout(() => {
 
   const discTab = [...doc.querySelectorAll('.segment-tab')].find(b => b.dataset.section === 'Discipleship');
   click(win, discTab);
-  check('Discipleship filter shows 1 list named Discipleship', doc.querySelectorAll('[data-section-list]').length === 1 && doc.querySelector('[data-section-list]')?.dataset.sectionList === 'Discipleship');
+  check('Discipleship filter shows only the Discipleship heading', doc.querySelector('.section-title')?.textContent === 'Discipleship' && !doc.querySelector('[data-section-list="Multimedia"]'));
 
   click(win, [...doc.querySelectorAll('.segment-tab')].find(b => b.dataset.section === 'all'));
-  check('back to All shows 5 sections', doc.querySelectorAll('[data-section-list]').length === 5, 'got ' + doc.querySelectorAll('[data-section-list]').length);
+  check('back to All shows 204 rows again', doc.querySelectorAll('[data-section-list] [data-task-id]').length === 204, 'got ' + doc.querySelectorAll('[data-section-list] [data-task-id]').length);
+  check('only the two populated sections render a list', doc.querySelectorAll('[data-section-list]').length === 2, 'got ' + doc.querySelectorAll('[data-section-list]').length);
 
   // ---- Calendar ----
   win.navigate('calendar');

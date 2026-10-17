@@ -28,6 +28,11 @@ check('multimedia locations detected', mm.some(t=>t.location==='CEC') && mm.some
 const dist={}; mm.forEach(t=>{const s=secFor(t); dist[s]=(dist[s]||0)+1;});
 console.log('mm sections:', JSON.stringify(dist));
 check('multimedia mostly Multimedia section', (dist.Multimedia||0) > 60, JSON.stringify(dist));
+check('every Facilities-department seed sits in Facilities', seeds.filter(t=>t.department==='Facilities').every(t=>secFor(t)==='Facilities'));
+check('every Multimedia-department seed sits in Multimedia', seeds.filter(t=>t.department==='Multimedia').every(t=>secFor(t)==='Multimedia'));
+const fullDist={}; seeds.forEach(t=>{const s=secFor(t); fullDist[s]=(fullDist[s]||0)+1;});
+console.log('all-seed sections:', JSON.stringify(fullDist));
+check('all seeds split Facilities(101)+Multimedia(103)', fullDist.Facilities===101 && fullDist.Multimedia===103, JSON.stringify(fullDist));
 // v2 store merge: existing edited task preserved + 103 appended
 const deepCopy = v => JSON.parse(JSON.stringify(v));
 const seedTasks = globalThis.__SEEDS, seedIdeas = [], seedActivity = [];

@@ -405,25 +405,26 @@ function statusPill(s){return `<span class="pill ${statusClass(s)}">${esc(s)}</s
 function priorityPill(p){return `<span class="pill ${priorityClass(p)}">${esc(p||'Low')}</span>`}
 function getTask(id){return state.tasks.find(t=>t.id===id)}
 function sectionFor(t){
-  const owner=String(t.owner||'').trim();
-  if(!owner||owner==='Unassigned')return 'Unassigned';
+  // A task's own department decides its section. This is the label the team
+  // put on the work, so it wins over keyword guessing.
+  const byDept={multimedia:'Multimedia',facilities:'Facilities',custodial:'Facilities',maintenance:'Facilities',worship:'Discipleship',events:'Discipleship',discipleship:'Discipleship',ministry:'Discipleship',administration:'Admin',admin:'Admin',office:'Admin'};
+  const dept=String(t.department||'').trim().toLowerCase();
+  if(byDept[dept])return byDept[dept];
+  // No recognised department (blank or "Unsorted"): classify by what the task is about.
   const hay=((t.title||'')+' '+String(t.description||'')).toLowerCase();
   const has=(...words)=>words.some(w=>hay.includes(w));
-  if(has('worship','prayer','bible','disciple','ministry','fellowship','devotion','g12','vbs','easter','youth','kids','evangel','sermon','choir','usher','volunteer','outreach','cell group','baptism','communion','pastor','retreat','camp','revival','discipleship','sunday','sunday school','devotional','teaser','drama clip','christmas'))return 'Discipleship';
-  if(has('speaker','behringer','subwoofer','subs','led','cctv','sound booth','soundbooth','multimedia','projector','microphone','audio','video','camera','amplifier','avr','network switch','tv wire','tv in','cafeteria tv','fun hall tv','computer','laptop','printer','gadget','electronic','wire','wiring','internet','keyboard','monitor','speaker wire'))return 'Multimedia';
-  if(has('admin','paperwork','document','record','permit','license','office','filing','payroll','budget','finance','report','meeting','schedule','roster','announce','regist','database','attendance list','minutes'))return 'Admin';
-  const dept=String(t.department||'').trim();
-  if(dept==='Multimedia')return 'Multimedia';
-  if(dept==='Worship'||dept==='Events')return 'Discipleship';
-  if(dept==='Administration')return 'Admin';
-  return 'Facilities';
+  if(has('speaker','behringer','subwoofer','subs','led','cctv','sound booth','soundbooth','multimedia','projector','microphone','audio','video','camera','amplifier','avr','network','router','wifi','server','computer','laptop','printer','gadget','electronic','internet','keyboard','monitor','hdmi','novastar','atem','livestream'))return 'Multimedia';
+  if(has('worship','prayer','bible','disciple','fellowship','devotion','g12','vbs','easter','youth','kids','evangel','sermon','choir','usher','volunteer','outreach','cell group','baptism','communion','pastor','retreat','camp','revival','sunday','drama','christmas','ministry'))return 'Discipleship';
+  if(has('admin','paperwork','document','record','permit','license','office','filing','payroll','budget','finance','report','meeting','schedule','roster','announce','regist','database','attendance','minutes'))return 'Admin';
+  if(has('clean','repair','fix','install','build','paint','wire','wiring','gutter','roof','fence','drain','faucet','sink','pump','plumb','floor','wall','door','window','water','electric','aircon','concrete','grass','trim','tile','ceiling','canopy','awning','kubo','stockroom','bodega','carpentry'))return 'Facilities';
+  return 'Unassigned';
 }
 const SECTIONS=[
   {id:'Facilities',desc:'General building tasks, cleaning, and physical labor'},
   {id:'Multimedia',desc:'Media, gadgets, and electronics'},
   {id:'Discipleship',desc:'Spiritual life and discipleship'},
   {id:'Admin',desc:'Administrative work'},
-  {id:'Unassigned',desc:'Needs an owner assigned'}
+  {id:'Unassigned',desc:'No department set — classify these'}
 ];
 function sectionTasks(section,pool){
   const list=(pool||[]).filter(t=>sectionFor(t)===section);
@@ -561,7 +562,7 @@ function renderTasksPage(){
       <div class="priority-main"><div class="priority-task-name">${esc(t.title)}</div><div class="task-meta"><span>${esc(t.id)}</span><span class="meta-dot"></span><span>${esc(t.location||'Unknown')}</span><span class="meta-dot"></span><span>${esc(t.owner||'Unassigned')}</span>${t.dueDate?`<span class="meta-dot"></span><span>Due ${esc(formatDate(t.dueDate))}</span>`:''}</div></div>
       <div class="priority-side">${priorityPill(t.priority)}${statusPill(t.status)}</div>
       <div class="priority-actions"><button type="button" class="priority-move" data-task-move="up" data-id="${esc(t.id)}" aria-label="Move ${esc(t.title)} up" title="Move up" ${i===0?'disabled':''}>↑</button><button type="button" class="priority-move" data-task-move="down" data-id="${esc(t.id)}" aria-label="Move ${esc(t.title)} down" title="Move down" ${i===items.length-1?'disabled':''}>↓</button></div>
-    </article>`).join('')}</div>`:`<div class="panel" style="padding:13px 15px;color:var(--muted);font-size:12px">No tasks in this section. Drag tasks here is not needed — new matching tasks appear automatically.</div>`);
+    </article>`).join('')}</div>`:`<div class="panel" style="padding:13px 15px;color:var(--muted);font-size:12px">No tasks in this section yet. A task lands here from its department — set a task's department when you create or edit it, and it moves to the matching section automatically.</div>`);
   }).join('')}
  <div class="source-note">Counts are calculated from the records currently in this browser. Imported workbook entries stay visible as “Needs review” until their real status is confirmed; that is different from confirmed pending work. Source rows and notes are retained for reconciliation.</div>`;
 }

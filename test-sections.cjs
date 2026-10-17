@@ -13,11 +13,11 @@ let pass = 0, fail = 0;
 const check = (name, cond, extra='') => { if (cond) { pass++; console.log('PASS', name); } else { fail++; console.log('FAIL', name, extra); } };
 
 const cases = [
-  [{ title: 'Install sink drain and faucet inside Big Kubo', department: 'Facilities', owner: 'Unassigned' }, 'Unassigned'],
+  [{ title: 'Install sink drain and faucet inside Big Kubo', department: 'Facilities', owner: 'Unassigned' }, 'Facilities'],
   [{ title: 'Install sink drain and faucet inside Big Kubo', department: 'Facilities', owner: 'John' }, 'Facilities'],
-  [{ title: 'Complete water supply for Big Kubo', department: 'Facilities', owner: '' }, 'Unassigned'],
+  [{ title: 'Complete water supply for Big Kubo', department: 'Facilities', owner: '' }, 'Facilities'],
   [{ title: 'Bass guitar SUBS control', department: 'Multimedia', owner: 'Tech' }, 'Multimedia'],
-  [{ title: 'Network switch managed', department: 'Facilities', owner: 'Tech' }, 'Multimedia'],
+  [{ title: 'Network switch managed', department: 'Facilities', owner: 'Tech' }, 'Facilities'],
   [{ title: 'Clean the chapel floor', department: 'Custodial', owner: 'Ana' }, 'Facilities'],
   [{ title: 'Sunday worship rehearsal', department: 'Worship', owner: 'Ana' }, 'Discipleship'],
   [{ title: 'VBS teaser video', department: 'Events', owner: 'Ana' }, 'Discipleship'],
@@ -28,7 +28,13 @@ const cases = [
   [{ title: 'Youth fellowship night', department: '', owner: 'Bob' }, 'Discipleship'],
   [{ title: 'Fix projector in sanctuary', department: '', owner: 'Bob' }, 'Multimedia'],
   [{ title: 'Prepare payroll records', department: '', owner: 'Bob' }, 'Admin'],
+  [{ title: 'Sunday worship livestream setup', department: 'Multimedia', owner: 'Bob' }, 'Multimedia'],
+  [{ title: 'Install subwoofers using the QSC amp', department: 'Facilities', owner: 'Marck Paolo' }, 'Facilities'],
+  [{ title: 'Ask about parking rules', department: 'Unsorted', owner: 'Bob' }, 'Unassigned'],
+  [{ title: 'Worship hall media setup', department: 'Multimedia', owner: 'Paolo' }, 'Multimedia'],
+  [{ title: 'Repair stockroom and build server room', department: 'Facilities', owner: 'Unassigned' }, 'Facilities'],
 ];
+check('department wins over keywords (no task lands in Unassigned just for having no owner)', cases.every(([t, exp]) => secFor(t) === exp));
 for (const [t, exp] of cases) check(`section: "${t.title}" -> ${exp}`, secFor(t) === exp, 'got ' + secFor(t));
 check('5 sections', SECS.map(s => s.id).join(',') === 'Facilities,Multimedia,Discipleship,Admin,Unassigned');
 console.log(`\n${pass} passed, ${fail} failed`);
