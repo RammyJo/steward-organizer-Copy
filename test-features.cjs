@@ -45,6 +45,43 @@ setTimeout(() => {
   check('back to All shows 204 rows again', doc.querySelectorAll('[data-section-list] [data-task-id]').length === 204, 'got ' + doc.querySelectorAll('[data-section-list] [data-task-id]').length);
   check('only the two populated sections render a list', doc.querySelectorAll('[data-section-list]').length === 2, 'got ' + doc.querySelectorAll('[data-section-list]').length);
 
+  // ---- Manual "move to section" picker on each row ----
+  const badgeOf = s => [...doc.querySelectorAll('.segment-tab')].find(b => b.dataset.section === s).querySelector('.segment-count').textContent;
+  const pickers = doc.querySelectorAll('[data-move-section]');
+  check('every section row has a move picker', pickers.length === 204, 'got ' + pickers.length);
+  check('picker first option is Auto + section', pickers[0].value === '' && /^Auto/.test(pickers[0].options[0].textContent), pickers[0].value + ' / ' + pickers[0].options[0].textContent);
+  const victimId = doc.querySelector('[data-section-list="Multimedia"] [data-task-id]').dataset.taskId;
+  let picker = doc.querySelector(`[data-move-section="${victimId}"]`);
+  picker.value = 'Discipleship';
+  picker.dispatchEvent(new win.Event('change', { bubbles: true }));
+  check('a hand move creates a Discipleship list', !!doc.querySelector('[data-section-list="Discipleship"]'));
+  check('Discipleship holds exactly the moved task', doc.querySelectorAll('[data-section-list="Discipleship"] [data-task-id]').length === 1);
+  check('Multimedia drops to 102', badgeOf('Multimedia') === '102', badgeOf('Multimedia'));
+  check('Discipleship badge becomes 1', badgeOf('Discipleship') === '1', badgeOf('Discipleship'));
+  check('Facilities is untouched', badgeOf('Facilities') === '101', badgeOf('Facilities'));
+  check('picker remembers the hand move', doc.querySelector(`[data-move-section="${victimId}"]`).value === 'Discipleship');
+  picker = doc.querySelector(`[data-move-section="${victimId}"]`);
+  picker.value = '';
+  picker.dispatchEvent(new win.Event('change', { bubbles: true }));
+  check('back to Auto restores Multimedia 103', badgeOf('Multimedia') === '103', badgeOf('Multimedia'));
+  check('Discipleship is empty again', badgeOf('Discipleship') === '0', badgeOf('Discipleship'));
+
+  // ---- Discipleship review dialog ----
+  check('review callout appears on All', !![...doc.querySelectorAll('.callout')].find(c => /may be discipleship work/.test(c.textContent)), 'no callout');
+  click(win, doc.querySelector('.segment-tab[data-section="Multimedia"]'));
+  check('callout hidden while a section filter is active', ![...doc.querySelectorAll('.callout')].some(c => /may be discipleship work/.test(c.textContent)));
+  click(win, doc.querySelector('.segment-tab[data-section="all"]'));
+  const callout2 = [...doc.querySelectorAll('.callout')].find(c => /may be discipleship work/.test(c.textContent));
+  click(win, callout2.querySelector('[data-action="review-discipleship"]'));
+  const picks = [...doc.querySelectorAll('.split-pick')];
+  console.log('   (info) discipleship candidates offered: ' + picks.length);
+  check('review dialog lists ticked candidates', picks.length === 12 && picks.every(p => p.checked), 'picks ' + picks.length);
+  check('dialog tells you which section each one sits in', /currently in Multimedia/.test(doc.querySelector('.modal-body').textContent));
+  picks.forEach((p, i) => { if (i > 0) p.checked = false; });
+  click(win, doc.querySelector('[data-action="apply-discipleship"]'));
+  check('only the ticked task moved to Discipleship', doc.querySelectorAll('[data-section-list="Discipleship"] [data-task-id]').length === 1, 'got ' + doc.querySelectorAll('[data-section-list="Discipleship"] [data-task-id]').length);
+  check('review dialog closes after moving', doc.querySelectorAll('.split-pick').length === 0);
+
   // ---- Calendar ----
   win.navigate('calendar');
   const monthLabel = doc.querySelector('.cal-month')?.textContent || '';
@@ -76,6 +113,7 @@ setTimeout(() => {
   }
   check('all tabs navigate', navResults.every(r => r.endsWith('ok')), navResults.join(' '));
 
+  check('no runtime errors after the new flows', errors.length === 0, errors.join(' | '));
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 }, 4000);

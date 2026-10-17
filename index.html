@@ -35,6 +35,10 @@
 .priority-task-meta{display:flex;gap:7px;align-items:center;flex-wrap:wrap;color:var(--muted);font-size:11px;margin-top:5px}
 .priority-side{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
 .priority-actions{display:flex;gap:4px;align-items:center}
+.priority-section-move{display:flex;align-items:center}
+.priority-section-move select{width:auto;min-width:118px;font-size:11px;padding:4px 20px 4px 8px;border:1px solid var(--border);border-radius:7px;background:var(--surface-2);color:var(--muted)}
+.priority-section-move select:hover{border-color:var(--border-strong);color:var(--text)}
+@media(max-width:540px){.priority-section-move select{min-width:0;width:100%;font-size:10px;padding:3px 16px 3px 6px}}
 .priority-move{width:30px;height:30px;padding:0;display:grid;place-items:center;border:1px solid var(--border);border-radius:7px;background:var(--surface-2);color:var(--muted);font-size:15px}
 .priority-move:hover:not(:disabled){color:var(--text);border-color:var(--border-strong)}
 .priority-move:disabled{opacity:.28;cursor:not-allowed}
@@ -395,7 +399,7 @@ function deepCopy(v){return JSON.parse(JSON.stringify(v))}
 const STORAGE_KEY='steward-organizer-prototype-v1';
 const SEED_VERSION=3;
 let state=loadState();let currentPage='dashboard';let globalSearch='';let taskFilters={status:'all',department:'all',location:'all',priority:'all'};let projectFilter='all';let taskSectionFilter='all';let calendarCursor=new Date();let currentModal=null;let toastTimer;
-function loadState(){try{const raw=localStorage.getItem(STORAGE_KEY);if(raw){const s=JSON.parse(raw);if(s&&Array.isArray(s.tasks)&&Array.isArray(s.projects)){if(s.seedVersion!==SEED_VERSION){if(s.seedVersion===2){const have=new Set(s.tasks.map(t=>t.id));const add=deepCopy(seedTasks).filter(t=>{const n=parseInt(String(t.id||'').slice(2),10);return Number.isFinite(n)&&n>=302&&!have.has(t.id);});s.tasks=s.tasks.concat(add);}else{const done=s.tasks.filter(t=>['Completed','Cancelled'].includes(t.status));const keep=new Set(done.map(t=>t.id));s.tasks=done.concat(deepCopy(seedTasks));s.projects=deepCopy(seedProjects);s.projects.forEach(pr=>{pr.tasks=((pr.tasks||[]).filter(id=>keep.has(id)));});}let mx=404;s.tasks.forEach(t=>{const n=parseInt(String(t.id||'').slice(2),10);if(Number.isFinite(n)&&n>mx)mx=n;});s.nextTask=Math.max(s.nextTask||0,mx+1);s.seedVersion=SEED_VERSION;try{localStorage.setItem(STORAGE_KEY,JSON.stringify(s))}catch(e){}}return s}}}catch(e){}return {tasks:deepCopy(seedTasks),projects:deepCopy(seedProjects),ideas:deepCopy(seedIdeas),inbox:[],activity:deepCopy(seedActivity),theme:'dark',nextTask:405,nextProject:106,nextIdea:105,seedVersion:SEED_VERSION}}
+function loadState(){try{const raw=localStorage.getItem(STORAGE_KEY);if(raw){const s=JSON.parse(raw);if(s&&Array.isArray(s.tasks)&&Array.isArray(s.projects)){if(s.seedVersion!==SEED_VERSION){const __ov=new Map(s.tasks.filter(t=>t.sectionOverride).map(t=>[t.id,t.sectionOverride]));if(s.seedVersion===2){const have=new Set(s.tasks.map(t=>t.id));const add=deepCopy(seedTasks).filter(t=>{const n=parseInt(String(t.id||'').slice(2),10);return Number.isFinite(n)&&n>=302&&!have.has(t.id);});s.tasks=s.tasks.concat(add);}else{const done=s.tasks.filter(t=>['Completed','Cancelled'].includes(t.status));const keep=new Set(done.map(t=>t.id));s.tasks=done.concat(deepCopy(seedTasks));s.projects=deepCopy(seedProjects);s.projects.forEach(pr=>{pr.tasks=((pr.tasks||[]).filter(id=>keep.has(id)));});}s.tasks.forEach(t=>{if(__ov.has(t.id))t.sectionOverride=__ov.get(t.id);});let mx=404;s.tasks.forEach(t=>{const n=parseInt(String(t.id||'').slice(2),10);if(Number.isFinite(n)&&n>mx)mx=n;});s.nextTask=Math.max(s.nextTask||0,mx+1);s.seedVersion=SEED_VERSION;try{localStorage.setItem(STORAGE_KEY,JSON.stringify(s))}catch(e){}}return s}}}catch(e){}return {tasks:deepCopy(seedTasks),projects:deepCopy(seedProjects),ideas:deepCopy(seedIdeas),inbox:[],activity:deepCopy(seedActivity),theme:'dark',nextTask:405,nextProject:106,nextIdea:105,seedVersion:SEED_VERSION}}
 function saveState(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state))}catch(e){showToast('Browser storage is full. Export a backup before adding more attachments.')}}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function initials(name){if(!name||name==='Unassigned')return '—';return name.split(/\s+/).filter(Boolean).slice(0,2).map(x=>x[0].toUpperCase()).join('')}
@@ -404,7 +408,9 @@ function priorityClass(p){return 'priority-'+(String(p||'low').toLowerCase())}
 function statusPill(s){return `<span class="pill ${statusClass(s)}">${esc(s)}</span>`}
 function priorityPill(p){return `<span class="pill ${priorityClass(p)}">${esc(p||'Low')}</span>`}
 function getTask(id){return state.tasks.find(t=>t.id===id)}
-function sectionFor(t){
+const VALID_SECTIONS=['Facilities','Multimedia','Discipleship','Admin','Unassigned'];
+// Where a task would go on its own, before anyone moves it by hand.
+function sectionForAuto(t){
   // A task's own department decides its section. This is the label the team
   // put on the work, so it wins over keyword guessing.
   const byDept={multimedia:'Multimedia',facilities:'Facilities',custodial:'Facilities',maintenance:'Facilities',worship:'Discipleship',events:'Discipleship',discipleship:'Discipleship',ministry:'Discipleship',administration:'Admin',admin:'Admin',office:'Admin'};
@@ -418,6 +424,26 @@ function sectionFor(t){
   if(has('admin','paperwork','document','record','permit','license','office','filing','payroll','budget','finance','report','meeting','schedule','roster','announce','regist','database','attendance','minutes'))return 'Admin';
   if(has('clean','repair','fix','install','build','paint','wire','wiring','gutter','roof','fence','drain','faucet','sink','pump','plumb','floor','wall','door','window','water','electric','aircon','concrete','grass','trim','tile','ceiling','canopy','awning','kubo','stockroom','bodega','carpentry'))return 'Facilities';
   return 'Unassigned';
+}
+function sectionFor(t){
+  // A move made by a person always wins; otherwise the department decides.
+  const forced=String(t.sectionOverride||'').trim();
+  if(forced&&VALID_SECTIONS.indexOf(forced)>=0)return forced;
+  return sectionForAuto(t);
+}
+// Words that point at ministry / discipleship work. Used to SUGGEST a move,
+// never to move anything on its own (a media task can mention a ministry).
+const DISCIPLESHIP_HINTS=['vbs','vacation bible','sunday school','bible study','prayer meeting','prayer night','worship night','worship','praise','prayer','youth','kids','children','baptism','communion','sermon','preach','choir','usher','evangel','outreach','fellowship','retreat','encounter','devotion','discipleship','g12','d-group','dgroup','cell group','catechism','holy week'];
+function discipleshipCandidates(pool){
+  return (pool||state.tasks).filter(t=>{
+    if(t.sectionOverride||sectionForAuto(t)==='Discipleship')return false;
+    // Only look at the Multimedia register (and unlabelled rows): a
+    // Facilities row that mentions the worship hall is still buildings work.
+    const dept=String(t.department||'').trim().toLowerCase();
+    if(dept&&dept!=='multimedia'&&dept!=='unsorted')return false;
+    const hay=String(t.title||'').toLowerCase();
+    return DISCIPLESHIP_HINTS.some(k=>hay.includes(k));
+  });
 }
 const SECTIONS=[
   {id:'Facilities',desc:'General building tasks, cleaning, and physical labor'},
@@ -457,6 +483,12 @@ function moveSectionTask(id,delta,section){
   saveSectionOrder(ids,section,getTask(id)?.title||'');
 }
 function bindSectionLists(root){
+  root.querySelectorAll('[data-move-section]').forEach(sel=>{
+    // Keep the row's "open task" click from firing when the user uses the picker.
+    sel.addEventListener('click',e=>e.stopPropagation());
+    sel.addEventListener('mousedown',e=>e.stopPropagation());
+    sel.addEventListener('dragstart',e=>e.preventDefault());
+  });
   root.querySelectorAll('[data-section-list]').forEach(list=>{
     const section=list.dataset.sectionList;
     let draggedId=null;
@@ -530,6 +562,23 @@ function globalSearchPreamble(){return globalSearch.trim()?`<div class="callout"
 function renderTaskTable(tasks){if(!tasks.length)return noData('No matching tasks','Try changing the filters or create a new task.',btn('Create task','new-task','btn btn-sm btn-primary','plus'));return `<div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>Task</th><th>Department / location</th><th>Person in charge</th><th>Status</th><th>Priority</th><th>Due date</th></tr></thead><tbody>${tasks.map(t=>`<tr data-action="task-detail" data-id="${esc(t.id)}"><td><div class="td-primary">${esc(t.title)}<div class="td-secondary">${esc(t.id)} · ${esc(t.project||t.type)}</div></div></td><td><div>${esc(t.department)}</div><div class="td-secondary">${esc(t.location)}</div></td><td><div class="owner"><span class="owner-avatar">${esc(initials(t.owner))}</span><span>${esc(t.owner||'Unassigned')}</span></div></td><td>${statusPill(t.status)}</td><td>${priorityPill(t.priority)}</td><td>${t.dueDate?esc(formatDate(t.dueDate)):'<span style="color:var(--muted-2)">Not set</span>'}</td></tr>`).join('')}</tbody></table></div></div>`}
 function uniqueVals(field, includeTasks=state.tasks){return [...new Set(includeTasks.map(t=>t[field]).filter(Boolean))].sort((a,b)=>a.localeCompare(b))}
 function selectFilter(id,label,values,current){return `<select class="select" id="${id}" aria-label="${label}"><option value="all">All ${label.toLowerCase()}</option>${values.map(v=>`<option value="${esc(v)}" ${current===v?'selected':''}>${esc(v)}</option>`).join('')}</select>`}
+function sectionSplitCallout(pool){
+  const cands=discipleshipCandidates(pool);
+  if(!cands.length)return '';
+  return `<div class="callout" style="margin-bottom:12px">${icon('spark',17)}<div><strong>${cands.length} task${cands.length===1?'':'s'} in the Multimedia list may be discipleship work</strong><br>They mention things like VBS, youth, worship, or prayer. Review the list and tick the ones you want in Discipleship.</div>${btn('Review list','review-discipleship','btn btn-sm')}</div>`;
+}
+function reviewDiscipleshipSplit(){
+  const cands=discipleshipCandidates(filteredTasks());
+  if(!cands.length){showToast('Nothing to move — no tasks look like discipleship work.');return}
+  const rows=cands.map(t=>`<label class="setting-row" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer"><input type="checkbox" class="split-pick" value="${esc(t.id)}" checked style="margin-top:3px"/><span class="setting-body"><span class="setting-name">${esc(t.title)}</span><span class="setting-desc">${esc(t.id)} · currently in ${esc(sectionFor(t))}</span></span></label>`).join('');
+  openModal('Move tasks to Discipleship','Tick the tasks that are really discipleship work. Untick anything that is media or facilities work and it stays where it is.',`<div class="split-list">${rows}</div>`,`<button class="btn" data-action="close-modal">Keep as is</button><button class="btn btn-primary" data-action="apply-discipleship">Move ticked tasks</button>`,true);
+}
+function applyDiscipleshipSplit(){
+  const ids=[...document.querySelectorAll('.split-pick:checked')].map(c=>c.value);
+  if(!ids.length){closeModal();showToast('No tasks ticked — nothing was moved.');return}
+  ids.forEach(id=>{const t=getTask(id);if(t)t.sectionOverride='Discipleship'});
+  saveState();addActivity('Moved '+ids.length+' task'+(ids.length===1?'':'s')+' to the Discipleship section by hand.','activity');closeModal();renderPage();showToast('Moved '+ids.length+' task'+(ids.length===1?'':'s')+' to Discipleship.');
+}
 function sectionSegmentRow(tasks){
   const list=Array.isArray(tasks)?tasks:[];
   const opts=[{id:'all',label:'All',count:list.length}].concat(SECTIONS.map(s=>({id:s.id,label:s.id,count:sectionTasks(s.id,list).length})));
@@ -552,6 +601,7 @@ function renderTasksPage(){
  </div>
  <div class="filters" style="margin-bottom:14px">${selectFilter('filter-status','Status',['Needs review','Proposed','Ready','In progress','Blocked','On hold','Completed','Cancelled'],taskFilters.status)}${selectFilter('filter-location','Location',uniqueVals('location'),taskFilters.location)}${selectFilter('filter-priority','Priority',['High','Medium','Low'],taskFilters.priority)}<span style="color:var(--muted);font-size:11px;margin-left:auto">${tasks.length} matching record${tasks.length===1?'':'s'}</span></div>
   ${sectionSegmentRow(tasks)}
+  ${taskSectionFilter==='all'?sectionSplitCallout(tasks):''}
  ${projectFilter!=='all'?`<div class="callout" style="margin-bottom:12px">${icon('folder',17)}<div>Filtered to project <strong>${esc(projectFilter)}</strong>.</div>${btn('Clear project filter','clear-project','btn btn-ghost btn-sm')}</div>`:''}
   ${visibleSections.map(s=>{
     const items=sectionTasks(s.id,tasks);
@@ -561,7 +611,7 @@ function renderTasksPage(){
       <button type="button" class="priority-grip" draggable="true" data-task-grip="${esc(t.id)}" aria-label="Drag ${esc(t.title)} to reorder" title="Drag to reorder">⠿</button>
       <div class="priority-main"><div class="priority-task-name">${esc(t.title)}</div><div class="task-meta"><span>${esc(t.id)}</span><span class="meta-dot"></span><span>${esc(t.location||'Unknown')}</span><span class="meta-dot"></span><span>${esc(t.owner||'Unassigned')}</span>${t.dueDate?`<span class="meta-dot"></span><span>Due ${esc(formatDate(t.dueDate))}</span>`:''}</div></div>
       <div class="priority-side">${priorityPill(t.priority)}${statusPill(t.status)}</div>
-      <div class="priority-actions"><button type="button" class="priority-move" data-task-move="up" data-id="${esc(t.id)}" aria-label="Move ${esc(t.title)} up" title="Move up" ${i===0?'disabled':''}>↑</button><button type="button" class="priority-move" data-task-move="down" data-id="${esc(t.id)}" aria-label="Move ${esc(t.title)} down" title="Move down" ${i===items.length-1?'disabled':''}>↓</button></div>
+      <div class="priority-actions"><button type="button" class="priority-move" data-task-move="up" data-id="${esc(t.id)}" aria-label="Move ${esc(t.title)} up" title="Move up" ${i===0?'disabled':''}>↑</button><button type="button" class="priority-move" data-task-move="down" data-id="${esc(t.id)}" aria-label="Move ${esc(t.title)} down" title="Move down" ${i===items.length-1?'disabled':''}>↓</button><span class="priority-section-move"><select data-move-section="${esc(t.id)}" aria-label="Move ${esc(t.title)} to another section" title="Move to another section"><option value="">Auto · ${esc(sectionForAuto(t))}</option>${SECTIONS.map(s=>`<option value="${esc(s.id)}"${String(t.sectionOverride||'')===s.id?' selected':''}>${esc(s.id)}</option>`).join('')}</select></span></div>
     </article>`).join('')}</div>`:`<div class="panel" style="padding:13px 15px;color:var(--muted);font-size:12px">No tasks in this section yet. A task lands here from its department — set a task's department when you create or edit it, and it moves to the matching section automatically.</div>`);
   }).join('')}
  <div class="source-note">Counts are calculated from the records currently in this browser. Imported workbook entries stay visible as “Needs review” until their real status is confirmed; that is different from confirmed pending work. Source rows and notes are retained for reconciliation.</div>`;
@@ -726,7 +776,8 @@ document.getElementById('theme-toggle').addEventListener('click',()=>setTheme(st
 document.getElementById('quick-upload').addEventListener('click',()=>newNoteModal(false));
 document.getElementById('mobile-menu').addEventListener('click',()=>{document.getElementById('sidebar').classList.add('open');document.getElementById('mobile-shade').classList.add('show')});document.getElementById('mobile-shade').addEventListener('click',()=>{document.getElementById('sidebar').classList.remove('open');document.getElementById('mobile-shade').classList.remove('show')});
 document.addEventListener('change',e=>{if(e.target.id==='filter-status')taskFilters.status=e.target.value;if(e.target.id==='filter-department')taskFilters.department=e.target.value;if(e.target.id==='filter-location')taskFilters.location=e.target.value;if(e.target.id==='filter-priority')taskFilters.priority=e.target.value;if(['filter-status','filter-department','filter-location','filter-priority'].includes(e.target.id))renderPage();if(e.target.id==='restore-file')restoreData(e.target.files?.[0])});
-document.addEventListener('click',e=>{const el=e.target.closest('[data-action]');if(!el)return;const a=el.dataset.action;const id=el.dataset.id;if(a==='close-modal'){closeModal();return}if(a==='new-task'){taskForm();return}if(a==='edit-task'){taskForm(getTask(id));return}if(a==='task-detail'){openTaskDetail(id);return}if(a==='delete-task-confirm'){confirmDeleteTask(id);return}if(a==='new-project'){projectForm();return}if(a==='edit-project'){const p=state.projects.find(p=>p.id===id);if(p)projectForm(p);return}if(a==='new-idea'){ideaForm();return}if(a==='idea-detail'){ideaDetail(id);return}if(a==='promote-idea'){promoteIdea(id);return}if(a==='upload-notes'){newNoteModal(false);return}if(a==='typed-note'){newNoteModal(true);return}if(a==='inbox-review'){inboxReview(id);return}if(a==='transcribe-note'){const n=state.inbox.find(x=>x.id===id);if(n){closeModal();transcriptionModal(n)}return}if(a==='project-tasks'){viewProjectTasks(id);return}if(a==='location-tasks'){viewLocationTasks(el.dataset.name,el.dataset.kind);return}if(a==='go-tasks'){navigate('tasks');return}if(a==='go-inbox'){navigate('inbox');return}if(a==='go-projects'){navigate('projects');return}if(a==='refresh-priority-list'){if(Array.isArray(state.priorityOrder)){const ordered=priorityTasks().map(t=>t.id);state.priorityOrder=ordered.concat(state.priorityOrder.filter(id=>!ordered.includes(id)));saveState()}renderPage();showToast('Priority list refreshed.');return}if(a==='clear-project'){projectFilter='all';renderPage();return}if(a==='filter-section'){taskSectionFilter=el.dataset.section||'all';renderPage();return}if(a==='cal-prev'){calendarCursor=new Date(calendarCursor.getFullYear(),calendarCursor.getMonth()-1,1);renderPage();return}if(a==='cal-next'){calendarCursor=new Date(calendarCursor.getFullYear(),calendarCursor.getMonth()+1,1);renderPage();return}if(a==='cal-today'){calendarCursor=new Date();renderPage();return}if(a==='export-data'){exportData();return}if(a==='reset-data'){resetData();return}if(a==='new-tag'){newTagModal();return}if(a==='close-backdrop'&&e.target===el){closeModal();return}});
+document.addEventListener('click',e=>{const el=e.target.closest('[data-action]');if(!el)return;const a=el.dataset.action;const id=el.dataset.id;if(a==='review-discipleship'){reviewDiscipleshipSplit();return}if(a==='apply-discipleship'){applyDiscipleshipSplit();return}if(a==='close-modal'){closeModal();return}if(a==='new-task'){taskForm();return}if(a==='edit-task'){taskForm(getTask(id));return}if(a==='task-detail'){openTaskDetail(id);return}if(a==='delete-task-confirm'){confirmDeleteTask(id);return}if(a==='new-project'){projectForm();return}if(a==='edit-project'){const p=state.projects.find(p=>p.id===id);if(p)projectForm(p);return}if(a==='new-idea'){ideaForm();return}if(a==='idea-detail'){ideaDetail(id);return}if(a==='promote-idea'){promoteIdea(id);return}if(a==='upload-notes'){newNoteModal(false);return}if(a==='typed-note'){newNoteModal(true);return}if(a==='inbox-review'){inboxReview(id);return}if(a==='transcribe-note'){const n=state.inbox.find(x=>x.id===id);if(n){closeModal();transcriptionModal(n)}return}if(a==='project-tasks'){viewProjectTasks(id);return}if(a==='location-tasks'){viewLocationTasks(el.dataset.name,el.dataset.kind);return}if(a==='go-tasks'){navigate('tasks');return}if(a==='go-inbox'){navigate('inbox');return}if(a==='go-projects'){navigate('projects');return}if(a==='refresh-priority-list'){if(Array.isArray(state.priorityOrder)){const ordered=priorityTasks().map(t=>t.id);state.priorityOrder=ordered.concat(state.priorityOrder.filter(id=>!ordered.includes(id)));saveState()}renderPage();showToast('Priority list refreshed.');return}if(a==='clear-project'){projectFilter='all';renderPage();return}if(a==='filter-section'){taskSectionFilter=el.dataset.section||'all';renderPage();return}if(a==='cal-prev'){calendarCursor=new Date(calendarCursor.getFullYear(),calendarCursor.getMonth()-1,1);renderPage();return}if(a==='cal-next'){calendarCursor=new Date(calendarCursor.getFullYear(),calendarCursor.getMonth()+1,1);renderPage();return}if(a==='cal-today'){calendarCursor=new Date();renderPage();return}if(a==='export-data'){exportData();return}if(a==='reset-data'){resetData();return}if(a==='new-tag'){newTagModal();return}if(a==='close-backdrop'&&e.target===el){closeModal();return}});
+document.addEventListener('change',e=>{const sel=e.target.closest('[data-move-section]');if(!sel)return;const t=getTask(sel.dataset.moveSection);if(!t)return;const val=String(sel.value||'');const auto=sectionForAuto(t);if(val&&val!==auto){t.sectionOverride=val}else{delete t.sectionOverride}t.updated='Moved by hand';saveState();addActivity('Moved “'+t.title+'” to the '+(t.sectionOverride||auto)+' section.','activity');renderPage();showToast(t.sectionOverride?'Moved to '+t.sectionOverride+'.':'Back to automatic ('+auto+').');});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();document.getElementById('global-search').focus()}});
 setTheme(state.theme||'dark');renderPage();
 </script>

@@ -3,9 +3,9 @@ const html = fs.readFileSync('C:\\Users\\ORAS Intern\\AppData\\Local\\Temp\\open
 const store = {};
 global.localStorage = { getItem: k => store[k] ?? null, setItem: (k,v) => { store[k]=String(v); }, removeItem: k => { delete store[k]; } };
 global.showToast = () => {};
-const i0 = html.indexOf('function sectionFor(t){');
+const i0 = html.indexOf('const VALID_SECTIONS=');
 const i1 = html.indexOf('function filteredTasks(){', i0);
-const src = html.slice(i0, i1) + '\n;globalThis.__S = { sectionFor, SECTIONS };';
+const src = html.slice(i0, i1) + '\n;globalThis.__S = { sectionFor, sectionForAuto, SECTIONS };';
 const state = { priorityOrder: [], tasks: [] };
 const saveState = () => {}, addActivity = () => {}, renderPage = () => {}, showToast = () => {};
 const getTask = () => null;
