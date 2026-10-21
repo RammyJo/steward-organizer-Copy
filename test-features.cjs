@@ -105,9 +105,70 @@ setTimeout(() => {
   click(win, doc.querySelector('[data-action="cal-next"]'));
   check('Next moves forward a month', doc.querySelector('.cal-month').textContent !== before);
 
+  // ---- Navigation reflects the capture flow ----
+  const navPages = [...doc.querySelectorAll('#primary-nav [data-page]')].map(b => b.dataset.page);
+  const navText = [...doc.querySelectorAll('#primary-nav [data-page]')].map(b => b.textContent.trim());
+  check('no Inbox nav item', !navPages.includes('inbox') && !navText.some(t => /^Inbox/.test(t)), navText.join(' | '));
+  check('no AI Task Capture nav item', !navPages.includes('ai-capture') && !navText.some(t => /AI Task Capture/.test(t)), navText.join(' | '));
+  check('For confirmation nav item exists', navPages.includes('confirmations') && navText.some(t => /^For confirmation/.test(t)), navText.join(' | '));
+
+  win.navigate('dashboard');
+  click(win, doc.querySelector('[data-action="upload-notes"]'));
+  check('Capture notes opens the capture page', win.eval('currentPage') === 'ai-capture', win.eval('currentPage'));
+  check('capture page sends readings to confirmation', /Send to For confirmation/.test(doc.getElementById('page-content').textContent));
+
+  // ---- Confirmation queue ----
+  win.navigate('confirmations');
+  check('empty confirmation queue explains itself', /Nothing waiting for confirmation/.test(doc.getElementById('page-content').textContent));
+  win.eval(`state.confirmations.unshift({id:'C-1',title:'note.jpg',createdAt:new Date().toISOString(),source:'AI image capture',files:['note.jpg'],transcription:'Fix the speaker in the youth hall',notes:'',tasks:[{title:'Fix the speaker',description:'youth hall',department:'Multimedia',location:'CC',personInCharge:'Unassigned',priority:'Medium',confidence:0.72,tags:['#mm'],type:'Maintenance',sourceFile:'note.jpg'}],status:'Pending confirmation'})`);
+  win.navigate('confirmations');
+  check('pending capture is listed', /note\.jpg/.test(doc.getElementById('page-content').textContent));
+  check('confirmation badge counts pending captures', doc.getElementById('confirmation-count').textContent === '1', doc.getElementById('confirmation-count').textContent);
+  const beforeConfirm = win.eval('state.tasks.length');
+  click(win, doc.querySelector('[data-action="review-confirmation"]'));
+  check('review modal opens with editable rows', doc.querySelectorAll('[data-confirm-row]').length === 1);
+  doc.querySelector('[data-confirm="person"]').value = 'Rodel';
+  click(win, doc.querySelector('[data-action="confirm-capture"]'));
+  check('confirming adds exactly one task', win.eval('state.tasks.length') === beforeConfirm + 1, beforeConfirm + ' -> ' + win.eval('state.tasks.length'));
+  check('confirmed task is Ready when a person is set', win.eval('state.tasks[0].status') === 'Ready', win.eval('state.tasks[0].status'));
+  check('capture is marked Confirmed', win.eval("state.confirmations[0].status") === 'Confirmed', win.eval("state.confirmations[0].status"));
+  check('badge clears after confirming', doc.getElementById('confirmation-count').textContent === '0', doc.getElementById('confirmation-count').textContent);
+  check('recently handled list appears', /Recently handled/.test(doc.getElementById('page-content').textContent));
+
+  // ---- Editable calendar ----
+  win.navigate('calendar');
+  click(win, doc.querySelector('[data-action="cal-today"]'));
+  check('calendar offers New event', !!doc.querySelector('[data-action="new-event"]'));
+  click(win, doc.querySelector('[data-action="new-event"]'));
+  check('event form opens', !!doc.getElementById('event-form'));
+  doc.getElementById('f-title').value = 'Staff meeting';
+  doc.getElementById('f-date').value = win.eval('todayISO()');
+  doc.getElementById('f-start').value = '09:00';
+  doc.getElementById('f-end').value = '10:00';
+  doc.getElementById('f-location').value = 'CEC';
+  doc.getElementById('event-form').dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
+  check('event is saved', win.eval('state.events.length') === 1, win.eval('state.events.length'));
+  check('event chip appears on the calendar', !!doc.querySelector('.cal-event'));
+  check('event shows on its day', /Staff meeting/.test(doc.querySelector('.cal-grid').textContent));
+  click(win, doc.querySelector('.cal-event'));
+  check('event detail opens', doc.querySelector('.modal-title')?.textContent === 'Staff meeting');
+  click(win, doc.querySelector('[data-action="edit-event"]'));
+  doc.getElementById('f-title').value = 'Staff meeting (moved)';
+  doc.getElementById('event-form').dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
+  check('event can be edited', /Staff meeting \(moved\)/.test(doc.querySelector('.cal-grid').textContent));
+  click(win, doc.querySelector('.cal-event'));
+  click(win, doc.querySelector('[data-action="delete-event"]'));
+  click(win, doc.getElementById('delete-event-confirm'));
+  check('event can be deleted', win.eval('state.events.length') === 0, win.eval('state.events.length'));
+  const addBtn = doc.querySelector('.cal-add');
+  const addDate = addBtn.dataset.date;
+  click(win, addBtn);
+  check('day + prefills that date', doc.getElementById('f-date').value === addDate, doc.getElementById('f-date').value + ' vs ' + addDate);
+  click(win, doc.querySelector('[data-action="close-modal"]'));
+
   // ---- Other tabs still fine ----
   const navResults = [];
-  for (const p of ['dashboard', 'tasks', 'calendar', 'reports', 'admin', 'inbox']) {
+  for (const p of ['dashboard', 'tasks', 'calendar', 'reports', 'admin', 'confirmations']) {
     try { win.navigate(p); navResults.push(p + ':' + (doc.getElementById('page-content').innerHTML.length > 0 ? 'ok' : 'EMPTY')); }
     catch (e) { navResults.push(p + ':THROW'); }
   }
