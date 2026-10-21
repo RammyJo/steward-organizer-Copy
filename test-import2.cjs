@@ -35,7 +35,7 @@ console.log('all-seed sections:', JSON.stringify(fullDist));
 check('all seeds split Facilities(101)+Multimedia(103)', fullDist.Facilities===101 && fullDist.Multimedia===103, JSON.stringify(fullDist));
 // v2 store merge: existing edited task preserved + 103 appended
 const deepCopy = v => JSON.parse(JSON.stringify(v));
-const seedTasks = globalThis.__SEEDS, seedIdeas = [], seedActivity = [];
+const seedTasks = globalThis.__SEEDS, seedIdeas = [], seedActivity = [], seedDictionary = [];
 const seedProjects = [{id:'P-9', tasks:[]}];
 const STORAGE_KEY='steward-organizer-prototype-v1';
 let state2, currentPage, globalSearch, taskFilters, projectFilter, currentModal, toastTimer;

@@ -166,6 +166,49 @@ setTimeout(() => {
   check('day + prefills that date', doc.getElementById('f-date').value === addDate, doc.getElementById('f-date').value + ' vs ' + addDate);
   click(win, doc.querySelector('[data-action="close-modal"]'));
 
+  // ---- Administration (Manage nav) ----
+  const manageBtn = doc.querySelector('nav [data-page="admin"]');
+  check('Administration sits under Manage', !!manageBtn && /Administration/.test(manageBtn.textContent));
+  click(win, manageBtn);
+  check('Administration button opens the page', win.eval('currentPage') === 'admin', win.eval('currentPage'));
+  check('Administration shows the hashtag dictionary', /Hashtag dictionary/.test(doc.getElementById('page-content').textContent));
+  check('the Workspace preview label is gone', !/Workspace preview/.test(doc.body.textContent));
+  const dictBefore = win.eval('state.dictionary.length');
+  click(win, doc.querySelector('[data-action="new-tag"]'));
+  doc.getElementById('f-tag').value = 'test';
+  doc.getElementById('f-meaning').value = 'Test tag';
+  doc.getElementById('f-destination').value = 'Testing';
+  doc.getElementById('tag-form').dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
+  check('adding a tag persists it', win.eval('state.dictionary.length') === dictBefore + 1, win.eval('state.dictionary.length') + ' vs ' + (dictBefore + 1));
+  check('the new tag is normalized and listed', /#test/.test(doc.getElementById('page-content').textContent));
+  const testRow = [...doc.querySelectorAll('.dictionary-row')].find(r => /#test/.test(r.textContent));
+  click(win, testRow.querySelector('[data-action="delete-tag"]'));
+  check('removing a tag persists it', win.eval('state.dictionary.length') === dictBefore, win.eval('state.dictionary.length') + ' vs ' + dictBefore);
+
+  // ---- Priority editing ----
+  win.navigate('tasks');
+  const activeRows = doc.querySelectorAll('[data-section-list] [data-task-id]').length;
+  check('every task row has a priority picker', doc.querySelectorAll('[data-set-priority]').length === activeRows, doc.querySelectorAll('[data-set-priority]').length + ' vs ' + activeRows);
+  const pSel = doc.querySelector('[data-set-priority]');
+  const pid = pSel.dataset.setPriority;
+  check('Very High is offered in the picker', [...pSel.options].some(o => o.value === 'Very High'));
+  pSel.value = 'Very High';
+  pSel.dispatchEvent(new win.Event('change', { bubbles: true }));
+  check('priority changes inline', win.eval(`getTask('${pid}').priority`) === 'Very High', win.eval(`getTask('${pid}').priority`));
+  check('Very High gets its own style', doc.querySelector(`[data-set-priority="${pid}"]`).classList.contains('priority-very-high'));
+  check('the priority filter includes Very High', [...doc.querySelectorAll('#filter-priority option')].some(o => o.value === 'Very High'));
+  click(win, doc.querySelector('[data-section-list] [data-task-id]'));
+  check('task detail has a priority picker', !!doc.querySelector('.modal [data-set-priority]'));
+  const detailSel = doc.querySelector('.modal [data-set-priority]');
+  const detailId = detailSel.dataset.setPriority;
+  detailSel.value = 'Low';
+  detailSel.dispatchEvent(new win.Event('change', { bubbles: true }));
+  check('priority changes from the task detail', win.eval(`getTask('${detailId}').priority`) === 'Low', win.eval(`getTask('${detailId}').priority`));
+  click(win, doc.querySelector('[data-action="close-modal"]'));
+  click(win, doc.querySelector('[data-action="new-task"]'));
+  check('the task form offers Very High', [...doc.querySelectorAll('#f-priority option')].some(o => o.value === 'Very High'));
+  click(win, doc.querySelector('[data-action="close-modal"]'));
+
   // ---- Other tabs still fine ----
   const navResults = [];
   for (const p of ['dashboard', 'tasks', 'calendar', 'reports', 'admin', 'confirmations']) {
