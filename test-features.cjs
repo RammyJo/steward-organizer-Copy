@@ -1,6 +1,6 @@
 const fs = require('fs');
 const { JSDOM } = require('jsdom');
-const html = fs.readFileSync('C:\\Users\\ORAS Intern\\AppData\\Local\\Temp\\opencode\\steward-repo\\index.html', 'utf8');
+const html = fs.readFileSync(require('path').join(__dirname,'index.html'), 'utf8');
 let pass = 0, fail = 0;
 const check = (n, c, e = '') => { if (c) { pass++; console.log('PASS', n); } else { fail++; console.log('FAIL', n, e); } };
 const errors = [];
@@ -116,6 +116,33 @@ setTimeout(() => {
   click(win, doc.querySelector('[data-action="upload-notes"]'));
   check('Capture notes opens the capture page', win.eval('currentPage') === 'ai-capture', win.eval('currentPage'));
   check('capture page sends readings to confirmation', /Send to For confirmation/.test(doc.getElementById('page-content').textContent));
+  check('capture offers a Stop for a long batch', !!doc.getElementById('ai-capture-stop'));
+  check('capture tells you to turn a sideways photo', /turn it|upright/i.test(doc.getElementById('page-content').textContent));
+  check('capture explains learning now travels with the backup', /backup file/.test(doc.getElementById('page-content').textContent));
+
+  // ---- Reading profile lives in Administration ----
+  win.navigate('admin');
+  const adminText = doc.getElementById('page-content').textContent;
+  check('Administration exposes the reading profile', /Reading profile/.test(adminText));
+  check('Administration shows the correction memory', /Correction memory/.test(adminText));
+  const profileBox = doc.getElementById('reading-profile');
+  check('the profile is an editable box', !!profileBox);
+  profileBox.value = 'Green highlighter marks a heading.';
+  click(win, doc.querySelector('[data-action="save-reading-profile"]'));
+  check('profile edit persists to state', win.eval('state.readingProfile') === 'Green highlighter marks a heading.', win.eval('state.readingProfile'));
+  check('profile survives a save/load round trip', /Green highlighter marks a heading\./.test(String(win.eval('localStorage.getItem("steward-organizer-prototype-v1")'))));
+  click(win, doc.querySelector('[data-action="clear-reading-profile"]'));
+  check('clearing falls back to the built-in brief', win.eval('state.readingProfile') === '');
+
+  // ---- Corrections are stored as AI-said / human-changed pairs ----
+  win.eval(`state.pastorPatterns=[]`);
+  win.eval(`rememberCorrection({photoKey:'p1',rawLine:'pur spray (Roy)',correctedTitle:'Pressure sprayer — Roy',department:'Facilities',person:'Roy',edited:true,confidence:0.4})`);
+  const stored = JSON.parse(win.eval('JSON.stringify(state.pastorPatterns)'));
+  check('a correction records what the AI said', stored[0].rawLine === 'pur spray (Roy)', JSON.stringify(stored[0]));
+  check('a correction records the human wording', stored[0].correctedTitle === 'Pressure sprayer — Roy' && stored[0].edited === true, JSON.stringify(stored[0]));
+  win.eval(`rememberCorrection({photoKey:'p1',rawLine:'pur spray (Roy)',correctedTitle:'Changed mind',department:'Facilities',person:'Roy',edited:true,confidence:0.4})`);
+  check('re-correcting the same line replaces the example', JSON.parse(win.eval('JSON.stringify(state.pastorPatterns)')).length === 1, win.eval('state.pastorPatterns.length'));
+  check('corrections are inside the exported payload', /pastorPatterns/.test(win.eval('JSON.stringify({...state})')));
 
   // ---- Confirmation queue ----
   win.navigate('confirmations');

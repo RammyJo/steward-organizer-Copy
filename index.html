@@ -541,6 +541,39 @@ function priorityPill(p){return `<span class="pill ${priorityClass(p)}">${esc(p|
 function prioritySelect(t,extra=''){return `<select class="select priority-select ${priorityClass(t.priority)}${extra?' '+extra:''}" data-set-priority="${esc(t.id)}" aria-label="Priority for ${esc(t.title)}" title="Change priority">${PRIORITIES.map(p=>`<option${p===(t.priority||'Medium')?' selected':''}>${p}</option>`).join('')}</select>`}
 // AI readings come back as 0-1, 0-100, or "high"/"medium"/"low". Normalise to 0-1.
 function readingConfidence(value){if(typeof value==='number')return value>1?value/100:value;const v=String(value??'').trim().toLowerCase();const n=Number(v.replace('%',''));if(v&&Number.isFinite(n))return n>1?n/100:n;if(v==='high')return .9;if(v==='medium')return .65;if(v==='low')return .4;return 0}
+// Corrections live in state so a backup carries the learning with it. Older
+// builds kept them in a separate key that export never included.
+const LEGACY_PATTERN_KEY='steward-pastor-patterns-v1';
+function photoKey(file){return String(file&&file.name||'photo')+':'+(file&&file.size||0)+':'+(file&&file.lastModified||0)}
+function learnedPatterns(){return Array.isArray(state.pastorPatterns)?state.pastorPatterns:[]}
+function readLearnedPatterns(){
+  if(!Array.isArray(state.pastorPatterns)){
+    let legacy=[];try{legacy=JSON.parse(localStorage.getItem(LEGACY_PATTERN_KEY)||'[]')}catch(e){}
+    state.pastorPatterns=Array.isArray(legacy)?legacy:[];
+    if(state.pastorPatterns.length){saveState();try{localStorage.removeItem(LEGACY_PATTERN_KEY)}catch(e){}}
+  }
+  return state.pastorPatterns;
+}
+function rememberCorrection(entry){  const list=readLearnedPatterns();
+  const key=entry.photoKey+'|'+entry.rawLine;
+  const at=list.findIndex(p=>(p.photoKey+'|'+p.rawLine)===key);
+  if(at>=0)list.splice(at,1);
+  list.unshift(entry);
+  state.pastorPatterns=list.slice(0,250);
+  saveState();
+}
+// The canonical brief lives on the server so the editor and the endpoint can
+// never drift apart; this fetches it for display and for a starting point.
+let builtInProfileCache='';
+function loadBuiltInProfile(){
+  const box=document.getElementById('built-in-profile');
+  const fill=(text)=>{if(!box)return;box.textContent=text;box.style.display='block'};
+  if(builtInProfileCache){fill(builtInProfileCache);return}
+  fetch('/api/decipher').then(r=>r.ok?r.json():Promise.reject(new Error('HTTP '+r.status))).then(d=>{
+    builtInProfileCache=String(d.readingProfile||'');
+    fill(builtInProfileCache+'\n\nSelect “Use built-in brief” below, or copy any part of this into the box above to extend it.');
+  }).catch(()=>{if(box){box.style.display='block';box.textContent='The built-in brief could not be loaded from /api/decipher. Captures still use it — this preview is only for reference.'}});
+}
 function getTask(id){return state.tasks.find(t=>t.id===id)}
 const VALID_SECTIONS=['Facilities','Multimedia','Discipleship','Admin','Unassigned'];
 // Where a task would go on its own, before anyone moves it by hand.
@@ -763,13 +796,32 @@ function renderReportsPage(){const all=state.tasks;const tasks=all.filter(t=>!['
 function renderAdminPage(){
   const dictionary=Array.isArray(state.dictionary)?state.dictionary:[];
   const rows=dictionary.length?dictionary.map((d,i)=>`<div class="dictionary-row"><span class="hash-tag">${esc(d.tag)}</span><div><div class="dictionary-meaning">${esc(d.meaning)}</div><div class="dictionary-destination">${esc(d.destination)}</div></div><button type="button" class="icon-btn" data-action="delete-tag" data-index="${i}" aria-label="Remove ${esc(d.tag)}" title="Remove ${esc(d.tag)}">${icon('trash',15)}</button></div>`).join(''):'<div class="input-note">No tags yet. Add the first one.</div>';
-  return `${pageHead('Workspace settings','Administration','Manage the reference tags and the data stored in this browser.')}
+  const patterns=readLearnedPatterns();
+  const editedExamples=patterns.filter(p=>p.edited).length;
+  const profileValue=state.readingProfile||'';
+  return `${pageHead('Workspace settings','Administration','Manage the reference tags, how the AI reads his handwriting, and the data stored in this browser.')}
   <div class="grid settings-grid">
+    <section class="panel">
+      <div class="panel-head"><div><h2 class="panel-title">Reading profile</h2><div class="panel-subtitle">The style brief sent with every handwriting request.</div></div>${btn('Show built-in brief','load-built-in-profile','btn btn-sm','file')}</div>
+      <div class="panel-body">
+        <textarea id="reading-profile" class="select" rows="12" style="width:100%;height:auto;font-family:var(--mono,monospace);font-size:12px;line-height:1.55;white-space:pre-wrap" placeholder="Leave blank to send the built-in brief. Anything you type here replaces it.">${esc(profileValue)}</textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">${btn('Save profile','save-reading-profile','btn btn-sm btn-primary','check')}${profileValue?btn('Use built-in brief','clear-reading-profile','btn btn-sm','refresh'):''}</div>
+        <div class="source-note">This is the plain-English description of how he marks up a page: what the highlighter, boxes, arrows, brackets and struck-through lines mean, his abbreviations, and his Taglish. Edit it whenever you teach the app something new about his notes — it is the fastest way to improve a reading, and it takes effect on the next capture.</div>
+        <div id="built-in-profile" class="detail-summary" style="display:none;margin-top:12px;white-space:pre-wrap;font-size:12px;max-height:340px;overflow:auto"></div>
+      </div>
+    </section>
     <section class="panel">
       <div class="panel-head"><div><h2 class="panel-title">Hashtag dictionary</h2><div class="panel-subtitle">The shorthand your team uses to describe work.</div></div>${btn('Add tag','new-tag','btn btn-sm','plus')}</div>
       <div class="panel-body">
         <div class="tag-dictionary">${rows}</div>
-        <div class="source-note">Saved in this browser with the rest of the workspace. Changing a tag here does not reclassify existing tasks.</div>
+        <div class="source-note">Saved in this browser with the rest of the workspace. Changing a tag here does not reclassify existing tasks. The tags listed here are also sent to the AI so it can classify with your vocabulary instead of inventing one.</div>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><div><h2 class="panel-title">Correction memory</h2><div class="panel-subtitle">Examples the AI is shown on every request.</div></div></div>
+      <div class="panel-body">
+        <div class="setting-row"><span class="setting-icon">${icon('activity')}</span><div class="setting-body"><div class="setting-name">${patterns.length} saved reading${patterns.length===1?'':'s'}</div><div class="setting-desc">${editedExamples} of them were changed by a person before confirming, so the app keeps the AI's original wording next to your correction.</div></div>${patterns.length?btn('Forget all','clear-patterns','btn btn-sm btn-danger','trash'):''}</div>
+        <div class="source-note">These examples travel with your backup file. Clearing them cannot be undone.</div>
       </div>
     </section>
     <section class="panel">
@@ -855,7 +907,6 @@ function confirmCapture(id){
   const c=state.confirmations.find(x=>x.id===id);if(!c)return;
   const rows=[...document.querySelectorAll('[data-confirm-row]')];
   const added=[];
-  const patterns=JSON.parse(localStorage.getItem('steward-pastor-patterns-v1')||'[]');
   rows.forEach(row=>{
     if(!row.querySelector('[data-confirm-include]').checked)return;
     const val=k=>row.querySelector('[data-confirm="'+k+'"]').value.trim();
@@ -864,11 +915,13 @@ function confirmCapture(id){
     const owner=val('person')||'Unassigned';
     const task={id:'T-'+state.nextTask++,title,description:val('description'),department:val('department')||'Facilities',location:val('location')||'Unknown',project:'',status:owner!=='Unassigned'?'Ready':'Needs review',priority:val('priority')||'Medium',owner,dueDate:'',type:s.type==='Task'?'Task':'Maintenance',tags:Array.isArray(s.tags)&&s.tags.length?s.tags:['#fac'],source:'Confirmed capture '+c.id,updated:'Confirmed by hand',notes:'AI reading confidence '+Math.round(readingConfidence(s.confidence)*100)+'%. Confirmed by a person; check the due date and status before work starts.'};
     added.push(task);
-    patterns.unshift({sourceText:String(s.description||s.title||''),correctedTitle:title,department:task.department,person:owner,tags:task.tags,confidence:readingConfidence(s.confidence),verifiedByHuman:true,updatedAt:new Date().toISOString()});
+    // The example the model should learn from is its own wording next to the
+    // human's, so a genuine correction is distinguishable from an acceptance.
+    const aiSaid=String(s.aiTitle||s.title||'');
+    rememberCorrection({photoKey:s.photoKey||'',rawLine:aiSaid,correctedTitle:title,correctedDescription:val('description'),department:task.department,location:task.location,person:owner,priority:task.priority,tags:task.tags,edited:aiSaid!==title,confidence:readingConfidence(s.confidence),verifiedByHuman:true,updatedAt:new Date().toISOString()});
   });
   if(!added.length){showToast('Tick at least one task with a title.');return}
   state.tasks.unshift(...added);
-  try{localStorage.setItem('steward-pastor-patterns-v1',JSON.stringify(patterns.slice(0,250)))}catch(e){}
   c.status='Confirmed';c.confirmedAt=new Date().toISOString();c.createdTaskIds=added.map(t=>t.id);
   addActivity('Confirmed '+added.length+' task'+(added.length===1?'':'s')+' from a captured note.','check-square');
   saveState();closeModal();renderPage();showToast('Added '+added.length+' task'+(added.length===1?'':'s')+' to the register.');
@@ -1039,8 +1092,8 @@ function viewProjectTasks(id){const p=state.projects.find(p=>p.id===id);if(!p)re
 function viewLocationTasks(name,kind){taskFilters={status:'all',department:'all',location:'all',priority:'all'};projectFilter='all';navigate('tasks');if(kind==='Department')taskFilters.department=name;else taskFilters.location=name;renderPage()}
 function showToast(text){const el=document.getElementById('toast');el.textContent=text;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),2800)}
 function exportData(){const payload={product:'Steward Organizer prototype',exportedAt:new Date().toISOString(),notice:'Prototype data only. This JSON export is not encrypted.',...state};const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='steward-organizer-backup-'+todayISO()+'.json';a.click();URL.revokeObjectURL(url);showToast('Backup exported.')}
-function resetData(){openModal('Reset prototype data?','This replaces this browser’s current data with the original sample records.',`<div class="detail-summary">This cannot be undone unless you have exported a backup. The workbook file itself will not be changed.</div>`,`${btn('Cancel','close-modal','btn')}<button class="btn btn-danger" id="confirm-reset">Reset data</button>`);document.getElementById('confirm-reset').onclick=()=>{state={tasks:deepCopy(seedTasks),projects:deepCopy(seedProjects),ideas:deepCopy(seedIdeas),inbox:[],activity:deepCopy(seedActivity),theme:state.theme,nextTask:405,nextProject:106,nextIdea:105,events:[],confirmations:[],dictionary:deepCopy(seedDictionary),nextEvent:1,nextConfirmation:1};saveState();closeModal();navigate('dashboard');showToast('Prototype data reset.') }}
-function restoreData(file){if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const x=JSON.parse(reader.result);if(!Array.isArray(x.tasks)||!Array.isArray(x.projects))throw new Error('Invalid');state={...state,...x};if(!Array.isArray(state.events))state.events=[];if(!Array.isArray(state.confirmations))state.confirmations=[];if(!Array.isArray(state.dictionary))state.dictionary=deepCopy(seedDictionary);if(!Number.isFinite(state.nextEvent))state.nextEvent=1;if(!Number.isFinite(state.nextConfirmation))state.nextConfirmation=1;saveState();setTheme(state.theme||'dark');navigate('dashboard');showToast('Backup restored.')}catch(e){showToast('That file is not a valid organizer JSON backup.')}};reader.readAsText(file)}
+function resetData(){openModal('Reset prototype data?','This replaces this browser’s current data with the original sample records.',`<div class="detail-summary">This cannot be undone unless you have exported a backup. The workbook file itself will not be changed. Your AI reading profile and correction memory are kept.</div>`,`${btn('Cancel','close-modal','btn')}<button class="btn btn-danger" id="confirm-reset">Reset data</button>`);document.getElementById('confirm-reset').onclick=()=>{state={tasks:deepCopy(seedTasks),projects:deepCopy(seedProjects),ideas:deepCopy(seedIdeas),inbox:[],activity:deepCopy(seedActivity),theme:state.theme,nextTask:405,nextProject:106,nextIdea:105,events:[],confirmations:[],dictionary:deepCopy(seedDictionary),nextEvent:1,nextConfirmation:1,pastorPatterns:readLearnedPatterns(),readingProfile:state.readingProfile||''};saveState();closeModal();navigate('dashboard');showToast('Prototype data reset.') }}
+function restoreData(file){if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const x=JSON.parse(reader.result);if(!Array.isArray(x.tasks)||!Array.isArray(x.projects))throw new Error('Invalid');state={...state,...x};if(!Array.isArray(state.events))state.events=[];if(!Array.isArray(state.confirmations))state.confirmations=[];if(!Array.isArray(state.dictionary))state.dictionary=deepCopy(seedDictionary);if(!Array.isArray(state.pastorPatterns))state.pastorPatterns=[];if(typeof state.readingProfile!=='string')state.readingProfile='';if(!Number.isFinite(state.nextEvent))state.nextEvent=1;if(!Number.isFinite(state.nextConfirmation))state.nextConfirmation=1;saveState();setTheme(state.theme||'dark');navigate('dashboard');showToast('Backup restored.')}catch(e){showToast('That file is not a valid organizer JSON backup.')}};reader.readAsText(file)}
 function newTagModal(){const body=`<form id="tag-form"><div class="form-grid">${field('Hashtag','tag','#new','text',{required:true,placeholder:'#mm'})}${field('Meaning','meaning','','text',{required:true,placeholder:'Multimedia'})}${field('Destination','destination','','text',{required:true,placeholder:'Section, calendar, or priority'})}</div></form>`;openModal('Add a hashtag','Add a tag to the workspace dictionary.',body,`${btn('Cancel','close-modal','btn')}<button class="btn btn-primary" type="submit" form="tag-form">Add tag</button>`);document.getElementById('tag-form').addEventListener('submit',e=>{e.preventDefault();const o=Object.fromEntries(new FormData(e.target).entries());let tag=String(o.tag||'').trim();if(!tag)return;if(!tag.startsWith('#'))tag='#'+tag;if(!Array.isArray(state.dictionary))state.dictionary=[];if(state.dictionary.some(d=>String(d.tag).toLowerCase()===tag.toLowerCase())){showToast('That tag is already in the dictionary.');return}state.dictionary.push({tag,meaning:String(o.meaning||'').trim(),destination:String(o.destination||'').trim()});addActivity(`Added hashtag ${tag} to the dictionary.`,'activity');saveState();closeModal();renderPage();showToast('Tag added.')})}
 // Navigation and shared actions
 document.getElementById('sidebar').addEventListener('click',e=>{const b=e.target.closest('[data-page]');if(b)navigate(b.dataset.page)});
@@ -1049,7 +1102,11 @@ document.getElementById('theme-toggle').addEventListener('click',()=>setTheme(st
 document.getElementById('quick-upload').addEventListener('click',()=>navigate('ai-capture'));
 document.getElementById('mobile-menu').addEventListener('click',()=>{document.getElementById('sidebar').classList.add('open');document.getElementById('mobile-shade').classList.add('show')});document.getElementById('mobile-shade').addEventListener('click',()=>{document.getElementById('sidebar').classList.remove('open');document.getElementById('mobile-shade').classList.remove('show')});
 document.addEventListener('change',e=>{if(e.target.id==='filter-status')taskFilters.status=e.target.value;if(e.target.id==='filter-department')taskFilters.department=e.target.value;if(e.target.id==='filter-location')taskFilters.location=e.target.value;if(e.target.id==='filter-priority')taskFilters.priority=e.target.value;if(['filter-status','filter-department','filter-location','filter-priority'].includes(e.target.id))renderPage();if(e.target.id==='restore-file')restoreData(e.target.files?.[0])});
-document.addEventListener('click',e=>{const el=e.target.closest('[data-action]');if(!el)return;const a=el.dataset.action;const id=el.dataset.id;if(a==='review-discipleship'){reviewDiscipleshipSplit();return}if(a==='apply-discipleship'){applyDiscipleshipSplit();return}if(a==='close-modal'){closeModal();return}if(a==='new-task'){taskForm();return}if(a==='edit-task'){taskForm(getTask(id));return}if(a==='task-detail'){openTaskDetail(id);return}if(a==='delete-task-confirm'){confirmDeleteTask(id);return}if(a==='new-project'){projectForm();return}if(a==='edit-project'){const p=state.projects.find(p=>p.id===id);if(p)projectForm(p);return}if(a==='new-idea'){ideaForm();return}if(a==='idea-detail'){ideaDetail(id);return}if(a==='promote-idea'){promoteIdea(id);return}if(a==='upload-notes'){navigate('ai-capture');return}if(a==='go-confirmations'){navigate('confirmations');return}if(a==='review-confirmation'){reviewConfirmation(id);return}if(a==='confirm-capture'){confirmCapture(currentConfirmationId);return}if(a==='discard-capture'){discardCapture(currentConfirmationId);return}if(a==='new-event'){eventForm(null,el.dataset.date||'');return}if(a==='event-detail'){eventDetail(id);return}if(a==='edit-event'){const ev=(state.events||[]).find(x=>x.id===id);if(ev)eventForm(ev);return}if(a==='delete-event'){confirmDeleteEvent(id);return}if(a==='cal-day'){calDayModal(el.dataset.date);return}if(a==='project-tasks'){viewProjectTasks(id);return}if(a==='location-tasks'){viewLocationTasks(el.dataset.name,el.dataset.kind);return}if(a==='go-tasks'){navigate('tasks');return}if(a==='go-projects'){navigate('projects');return}if(a==='refresh-priority-list'){if(Array.isArray(state.priorityOrder)){const ordered=priorityTasks().map(t=>t.id);state.priorityOrder=ordered.concat(state.priorityOrder.filter(id=>!ordered.includes(id)));saveState()}renderPage();showToast('Priority list refreshed.');return}if(a==='clear-project'){projectFilter='all';renderPage();return}if(a==='filter-section'){taskSectionFilter=el.dataset.section||'all';renderPage();return}if(a==='cal-prev'){calendarCursor=new Date(calendarCursor.getFullYear(),calendarCursor.getMonth()-1,1);renderPage();return}if(a==='cal-next'){calendarCursor=new Date(calendarCursor.getFullYear(),calendarCursor.getMonth()+1,1);renderPage();return}if(a==='cal-today'){calendarCursor=new Date();renderPage();return}if(a==='export-data'){exportData();return}if(a==='reset-data'){resetData();return}if(a==='delete-tag'){const i=Number(el.dataset.index);if(Array.isArray(state.dictionary)&&state.dictionary[i]){const d=state.dictionary[i];state.dictionary.splice(i,1);addActivity(`Removed hashtag ${d.tag} from the dictionary.`,'activity');saveState();renderPage();showToast('Tag removed.')}return}if(a==='new-tag'){newTagModal();return}if(a==='close-backdrop'&&e.target===el){closeModal();return}});
+document.addEventListener('click',e=>{const el=e.target.closest('[data-action]');if(!el)return;const a=el.dataset.action;const id=el.dataset.id;if(a==='review-discipleship'){reviewDiscipleshipSplit();return}if(a==='apply-discipleship'){applyDiscipleshipSplit();return}if(a==='close-modal'){closeModal();return}if(a==='new-task'){taskForm();return}if(a==='edit-task'){taskForm(getTask(id));return}if(a==='task-detail'){openTaskDetail(id);return}if(a==='delete-task-confirm'){confirmDeleteTask(id);return}if(a==='new-project'){projectForm();return}if(a==='edit-project'){const p=state.projects.find(p=>p.id===id);if(p)projectForm(p);return}if(a==='new-idea'){ideaForm();return}if(a==='idea-detail'){ideaDetail(id);return}if(a==='promote-idea'){promoteIdea(id);return}if(a==='upload-notes'){navigate('ai-capture');return}if(a==='go-confirmations'){navigate('confirmations');return}if(a==='review-confirmation'){reviewConfirmation(id);return}if(a==='confirm-capture'){confirmCapture(currentConfirmationId);return}if(a==='discard-capture'){discardCapture(currentConfirmationId);return}if(a==='new-event'){eventForm(null,el.dataset.date||'');return}if(a==='event-detail'){eventDetail(id);return}if(a==='edit-event'){const ev=(state.events||[]).find(x=>x.id===id);if(ev)eventForm(ev);return}if(a==='delete-event'){confirmDeleteEvent(id);return}if(a==='cal-day'){calDayModal(el.dataset.date);return}if(a==='project-tasks'){viewProjectTasks(id);return}if(a==='location-tasks'){viewLocationTasks(el.dataset.name,el.dataset.kind);return}if(a==='go-tasks'){navigate('tasks');return}if(a==='go-projects'){navigate('projects');return}if(a==='refresh-priority-list'){if(Array.isArray(state.priorityOrder)){const ordered=priorityTasks().map(t=>t.id);state.priorityOrder=ordered.concat(state.priorityOrder.filter(id=>!ordered.includes(id)));saveState()}renderPage();showToast('Priority list refreshed.');return}if(a==='clear-project'){projectFilter='all';renderPage();return}if(a==='filter-section'){taskSectionFilter=el.dataset.section||'all';renderPage();return}if(a==='cal-prev'){calendarCursor=new Date(calendarCursor.getFullYear(),calendarCursor.getMonth()-1,1);renderPage();return}if(a==='cal-next'){calendarCursor=new Date(calendarCursor.getFullYear(),calendarCursor.getMonth()+1,1);renderPage();return}if(a==='cal-today'){calendarCursor=new Date();renderPage();return}if(a==='export-data'){exportData();return}if(a==='reset-data'){resetData();return}if(a==='delete-tag'){const i=Number(el.dataset.index);if(Array.isArray(state.dictionary)&&state.dictionary[i]){const d=state.dictionary[i];state.dictionary.splice(i,1);addActivity(`Removed hashtag ${d.tag} from the dictionary.`,'activity');saveState();renderPage();showToast('Tag removed.')}return}if(a==='save-reading-profile'){const box=document.getElementById('reading-profile');if(box){state.readingProfile=box.value.trim();saveState();addActivity(state.readingProfile?'Updated the AI reading profile.':'Reset the AI reading profile to the built-in brief.','activity');renderPage();showToast(state.readingProfile?'Reading profile saved. The next capture will use it.':'Profile cleared — captures will use the built-in brief.')}return}
+if(a==='clear-reading-profile'){state.readingProfile='';saveState();renderPage();showToast('Profile cleared — captures will use the built-in brief.');return}
+if(a==='load-built-in-profile'){loadBuiltInProfile();return}
+if(a==='clear-patterns'){state.pastorPatterns=[];saveState();renderPage();showToast('Correction memory cleared.');return}
+if(a==='new-tag'){newTagModal();return}if(a==='close-backdrop'&&e.target===el){closeModal();return}});
 document.addEventListener('change',e=>{const sel=e.target.closest('[data-move-section]');if(!sel)return;const t=getTask(sel.dataset.moveSection);if(!t)return;const val=String(sel.value||'');const auto=sectionForAuto(t);if(val&&val!==auto){t.sectionOverride=val}else{delete t.sectionOverride}t.updated='Moved by hand';saveState();addActivity('Moved “'+t.title+'” to the '+(t.sectionOverride||auto)+' section.','activity');renderPage();showToast(t.sectionOverride?'Moved to '+t.sectionOverride+'.':'Back to automatic ('+auto+').');});
 document.addEventListener('change',e=>{const sel=e.target.closest('[data-set-priority]');if(!sel)return;const t=getTask(sel.dataset.setPriority);if(!t)return;const next=String(sel.value||'Medium');if(next===t.priority)return;t.priority=next;t.updated='Priority changed by hand';saveState();addActivity('Changed “'+t.title+'” priority to '+next+'.','activity');sel.className='select priority-select '+priorityClass(next);if(!sel.closest('#modal-root'))renderPage();showToast('Priority set to '+next+'.');});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();document.getElementById('global-search').focus()}});
@@ -1220,16 +1277,18 @@ const STEWARD_PROJECT_SEED = [{"id":"PRJ-002","title":"Covered Court","descripti
     document.querySelector('[data-action="export-accomplishments"]').addEventListener('click',() => csvDownload(accomplishmentRows(),'steward-accomplishments.csv'));
   }
   function renderAICapture() {
-    const learnedCount=(()=>{try{return JSON.parse(localStorage.getItem('steward-pastor-patterns-v1')||'[]').length}catch(e){return 0}})();
+    const learned=readLearnedPatterns();
+    const learnedCount=learned.length;
+    const editedCount=learned.filter(p=>p.edited).length;
     return `${pageHead('Capture','Capture notes','Photograph a handwritten note. The AI reads it, then the reading waits in For confirmation until a person checks it.', btn('For confirmation','go-confirmations','btn','inboxCheck'))}
-      <div class="callout" style="margin-bottom:16px"><span class="ico">${icon('info',18)}</span><div><strong>Pastor’s pattern memory · ${learnedCount} human corrections saved</strong><br>When you correct a suggestion, the app keeps an example in this browser and sends those examples with future decipher requests. This is a correction memory, not model retraining; it remains on this device until shared storage and the AI endpoint are connected.</div></div>
+      <div class="callout" style="margin-bottom:16px"><span class="ico">${icon('info',18)}</span><div><strong>How this app learns his handwriting · ${learnedCount} examples, ${editedCount} of them corrections you made</strong><br>Every reading you confirm is kept as a paired example — what the AI first said next to what you changed it to — and sent along with future requests. The style rules it reads pages by live in <strong>Administration → Reading profile</strong>. This is example memory and a written brief, not model retraining. Both now travel with your backup file.</div></div>
       <div class="grid dashboard-grid">
-        <section class="panel"><div class="panel-head"><div><h2 class="panel-title">1. Upload images</h2><div class="panel-subtitle">JPG, PNG, WEBP or GIF · up to 8 images per batch</div></div></div>
+        <section class="panel"><div class="panel-head"><div><h2 class="panel-title">1. Upload images</h2><div class="panel-subtitle">JPG, PNG, WEBP or GIF · up to 8 images per batch · tap a photo to turn it upright</div></div></div>
           <div class="panel-body">
             <input id="ai-capture-files" class="select" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple style="width:100%;height:auto;padding:10px">
             <div id="ai-capture-previews" class="grid" style="grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:10px;margin-top:12px"></div>
             <div class="callout" style="margin-top:14px">${icon('shield',17)}<div><strong>Review before sending.</strong><br>Images are sent to Cloudflare Workers AI to read the handwriting. The prototype keeps the transcription and the tasks you confirm, not the original photos. This app's task data is still stored in this browser only.</div></div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px"><button id="ai-capture-run" class="btn btn-primary" disabled>Decipher with AI</button><button id="ai-capture-clear" class="btn">Clear</button></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px"><button id="ai-capture-run" class="btn btn-primary" disabled>Decipher with AI</button><button id="ai-capture-stop" class="btn" disabled>Stop</button><button id="ai-capture-clear" class="btn">Clear</button></div>
             <div id="ai-capture-status" class="input-note" style="margin-top:10px">Choose a clear photo with good lighting.</div>
           </div>
         </section>
@@ -1242,8 +1301,12 @@ const STEWARD_PROJECT_SEED = [{"id":"PRJ-002","title":"Covered Court","descripti
       <datalist id="ai-capture-people">${[...new Set(state.tasks.map(t=>t.owner).filter(x=>x && x!=='Unassigned'))].map(n=>`<option value="${esc(n)}"></option>`).join('')}</datalist>`;
   }
   var AI_CAPTURE_MAX_FILE_BYTES = 8 * 1024 * 1024;
+  // A dense page can take the vision model well over a minute; past this the
+  // request is abandoned rather than left spinning.
+  var AI_CAPTURE_TIMEOUT_MS = 150000;
   var AI_CAPTURE_ACCEPT = ['image/jpeg','image/png','image/webp','image/gif'];
-  function optimizeImage(file) {
+  function optimizeImage(file, quarterTurns) {
+    const turns = ((Number(quarterTurns) || 0) % 4 + 4) % 4;
     return new Promise((resolve,reject) => {
       if(file && file.size > AI_CAPTURE_MAX_FILE_BYTES){ reject(new Error('Skipped ' + file.name + ': file is over 8MB. Use a smaller photo or crop closer to the writing.')); return; }
       if(file && file.type && AI_CAPTURE_ACCEPT.indexOf(file.type) === -1){ reject(new Error('Skipped ' + file.name + ': unsupported image type. Use JPG, PNG, WebP, or GIF.')); return; }
@@ -1254,15 +1317,20 @@ const STEWARD_PROJECT_SEED = [{"id":"PRJ-002","title":"Covered Court","descripti
         image.onerror = () => reject(new Error('Could not open ' + file.name));
         image.onload = () => {
           // 1600px keeps small handwriting legible while keeping uploads fast and under AI payload limits.
-          const scale = Math.min(1,1600 / Math.max(image.width,image.height));
+          // Phone photos of these sheets carry no EXIF orientation, so the writer turns them by hand.
+          const swapped = turns === 1 || turns === 3;
+          const scale = Math.min(1,1600 / Math.max(swapped ? image.height : image.width, swapped ? image.width : image.height));
           const canvas = document.createElement('canvas');
-          canvas.width = Math.max(1,Math.round(image.width*scale));
-          canvas.height = Math.max(1,Math.round(image.height*scale));
+          canvas.width = Math.max(1,Math.round((swapped ? image.height : image.width) * scale));
+          canvas.height = Math.max(1,Math.round((swapped ? image.width : image.height) * scale));
           try {
             const ctx = canvas.getContext('2d', { willReadFrequently: false });
             ctx.imageSmoothingEnabled = true;
             ctx.imageSmoothingQuality = 'high';
-            ctx.drawImage(image,0,0,canvas.width,canvas.height);
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.rotate(turns * Math.PI / 2);
+            const dw = image.width * scale, dh = image.height * scale;
+            ctx.drawImage(image, -dw / 2, -dh / 2, dw, dh);
             // JPEG 0.85 preserves pen strokes while keeping base64 payloads well under function limits.
             resolve(canvas.toDataURL('image/jpeg',0.85));
           }
@@ -1283,25 +1351,44 @@ const STEWARD_PROJECT_SEED = [{"id":"PRJ-002","title":"Covered Court","descripti
     const results = document.getElementById('ai-capture-results');
     const importBtn = document.getElementById('ai-capture-import');
     let files = [], suggestions = [], lastTranscription = '', lastNotes = '';
+    let turns = [];
+    let stopRequested = false;
+    const stopBtn = document.getElementById('ai-capture-stop');
+    stopBtn.addEventListener('click',() => { stopRequested = true; stopBtn.disabled = true; status.textContent = 'Stopping after the current image…'; });
     function choose() {
       files = Array.from(fileInput.files || []).slice(0,8);
+      turns = files.map(() => 0);
       suggestions = [];
-      previews.innerHTML = files.map(f => `<div><img src="${URL.createObjectURL(f)}" alt="" style="width:100%;height:90px;object-fit:cover;border-radius:7px"><div class="td-secondary" style="overflow-wrap:anywhere;margin-top:4px">${esc(f.name)}</div></div>`).join('');
+      previews.innerHTML = files.map((f,i) => `<div><img src="${URL.createObjectURL(f)}" alt="" data-ai-rotate="${i}" title="Select to turn this photo 90°" style="width:100%;height:90px;object-fit:cover;border-radius:7px;cursor:pointer"><div class="td-secondary" style="overflow-wrap:anywhere;margin-top:4px">${esc(f.name)}</div><div class="td-secondary" data-ai-turn="${i}">upright</div></div>`).join('');
       run.disabled = !files.length;
       results.innerHTML = noData('No image processed yet','Upload a note, then select “Decipher with AI”.');
       importBtn.disabled = true; notes.textContent = '';
-      status.textContent = files.length ? files.length + ' image(s) ready.' : 'Choose a clear photo with good lighting.';
+      status.textContent = files.length ? files.length + ' image(s) ready. If a photo is sideways, tap it to turn it before deciphering.' : 'Choose a clear photo with good lighting.';
     }
+    const TURN_LABELS = ['upright','turned 90° right','upside down','turned 90° left'];
+    previews.addEventListener('click',e => {
+      const el = e.target.closest('[data-ai-rotate]'); if(!el) return;
+      const i = Number(el.dataset.aiRotate); if(!Number.isFinite(i) || i >= files.length) return;
+      turns[i] = (turns[i] + 1) % 4;
+      el.style.transform = 'rotate(' + (turns[i] * 90) + 'deg)';
+      const label = previews.querySelector('[data-ai-turn="'+i+'"]');
+      if(label) label.textContent = TURN_LABELS[turns[i]];
+    });
     fileInput.addEventListener('change',choose);
     clear.addEventListener('click',() => {fileInput.value='';choose();});
     run.addEventListener('click',async () => {
-      run.disabled=true;fileInput.disabled=true;suggestions=[];const errs=[];let aiNotes='';let aiTranscriptions='';
+      run.disabled=true;fileInput.disabled=true;stopBtn.disabled=false;suggestions=[];const errs=[];let aiNotes='';let aiTranscriptions='';
+      const people=[...new Set(state.tasks.map(t=>t.owner).filter(x=>x && x!=='Unassigned'))];
+      const dictionary=(Array.isArray(state.dictionary)?state.dictionary:[]).map(d=>({tag:d.tag,label:d.label,meaning:d.meaning}));
       for(let i=0;i<files.length;i++){
-        status.textContent = 'Deciphering image ' + (i+1) + ' of ' + files.length + '…';
+        status.textContent = 'Deciphering image ' + (i+1) + ' of ' + files.length + '… (tap Stop to cancel)';
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), AI_CAPTURE_TIMEOUT_MS);
         try {
-          const image = await optimizeImage(files[i]);
-          const learnedPatterns=JSON.parse(localStorage.getItem('steward-pastor-patterns-v1')||'[]');
-          const response = await fetch('/api/decipher',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image,people:[...new Set(state.tasks.map(t=>t.owner).filter(x=>x && x!=='Unassigned'))],pastorPatterns:learnedPatterns,minimumConfidence:0.8,requireHumanVerificationBelow:0.8})});
+          const image = await optimizeImage(files[i], turns[i]);
+          const learnedPatterns=readLearnedPatterns();
+          const response = await fetch('/api/decipher',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({image,people,dictionary,pastorPatterns:learnedPatterns,readingProfile:state.readingProfile||''})});
+          clearTimeout(timer);
           let data;
           const rawResponse = await response.text();
           try { data = JSON.parse(rawResponse); }
@@ -1310,17 +1397,21 @@ const STEWARD_PROJECT_SEED = [{"id":"PRJ-002","title":"Covered Court","descripti
             const detail = data.detail ? ' Details: ' + String(data.detail).slice(0,300) : '';
             throw new Error((data.error || 'AI service returned an error (HTTP ' + response.status + ').') + detail);
           }
-          (data.tasks || []).forEach(t => suggestions.push({...t,sourceFile:files[i].name}));
+          (data.tasks || []).forEach(t => suggestions.push({...t,sourceFile:files[i].name,sourcePhotoKey:photoKey(files[i])}));
           if(data.transcription) aiTranscriptions += '--- ' + files[i].name + ' transcription ---\n' + String(data.transcription).slice(0,2000) + '\n';
           if(data.notes) aiNotes += files[i].name + ': ' + data.notes + '\n';
           if(!(data.tasks||[]).length && !data.transcription) aiNotes += files[i].name + ': no readable text found. Try a closer crop.\n';
-        } catch(e) { errs.push(files[i].name + ': ' + String(e.message || e)); }
+        } catch(e) {
+          clearTimeout(timer);
+          errs.push(files[i].name + ': ' + (e && e.name === 'AbortError' ? 'timed out after ' + Math.round(AI_CAPTURE_TIMEOUT_MS/1000) + 's — try a closer crop of one section.' : String(e.message || e)));
+        }
+        if(stopRequested){ errs.push('Stopped by you after ' + (i+1) + ' of ' + files.length + ' image(s).'); stopRequested=false; break; }
       }
       notes.textContent = (aiTranscriptions ? aiTranscriptions + '\n' : '') + aiNotes + (errs.length ? 'Issues: ' + errs.join(' | ') : '');
       lastTranscription = aiTranscriptions; lastNotes = aiNotes + (errs.length ? 'Issues: ' + errs.join(' | ') : '');
       renderSuggestions();
       status.textContent = suggestions.length ? 'AI found ' + suggestions.length + ' task suggestion(s). Check them, then send them to For confirmation.' : (errs.length ? 'Deciphering failed. Read the detailed error above; if it mentions the AI service or binding, the Cloudflare AI connection needs setup.' : 'The AI returned no actionable tasks. Check the transcription above or upload a closer crop.');
-      fileInput.disabled=false;run.disabled=!files.length;importBtn.disabled=!suggestions.length;
+      fileInput.disabled=false;run.disabled=!files.length;stopBtn.disabled=true;importBtn.disabled=!suggestions.length;
     });
     function confidenceScore(value){return readingConfidence(value)}
     function renderSuggestions() {
@@ -1347,7 +1438,7 @@ const STEWARD_PROJECT_SEED = [{"id":"PRJ-002","title":"Covered Court","descripti
         const value = k => card.querySelector('[data-ai="'+k+'"]').value.trim();
         const title = value('title'); if(!title) return;
         const s = suggestions[Number(card.dataset.aiRow)] || {};
-        readings.push({title,description:value('description'),department:value('department')||'Facilities',location:value('location')||'Unknown',personInCharge:value('person')||'Unassigned',priority:value('priority')||'Medium',confidence:s.confidence,tags:Array.isArray(s.tags)?s.tags:[],type:s.type,sourceFile:s.sourceFile||((files[0]&&files[0].name)||'')});
+        readings.push({title,description:value('description'),department:value('department')||'Facilities',location:value('location')||'Unknown',personInCharge:value('person')||'Unassigned',priority:value('priority')||'Medium',confidence:s.confidence,tags:Array.isArray(s.tags)?s.tags:[],type:s.type,sourceFile:s.sourceFile||((files[0]&&files[0].name)||''),photoKey:s.sourcePhotoKey||'',aiTitle:s.title||'',aiDescription:s.description||''});
       });
       if(!readings.length){status.textContent='Select at least one task with a title.';return;}
       const batch={id:'C-'+state.nextConfirmation++,title:((files[0]&&files[0].name)||'Captured note'),createdAt:new Date().toISOString(),source:'AI image capture',files:files.map(f=>f.name),transcription:lastTranscription,notes:lastNotes,tasks:readings,status:'Pending confirmation'};

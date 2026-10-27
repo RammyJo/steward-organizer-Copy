@@ -1,15 +1,15 @@
 // Tests for functions/api/decipher.js
 // Run: node test-decipher.mjs
-import { onRequestPost, onRequestOptions } from './functions/api/decipher.js';
+import { onRequestPost, onRequestOptions, onRequestGet } from './functions/api/decipher.js';
 
 let passed = 0, failed = 0;
 function ok(name, cond, extra = '') {
   if (cond) { passed++; console.log('PASS ' + name); }
   else { failed++; console.log('FAIL ' + name + ' ' + extra); }
 }
-function makeRequest(obj) {
+function makeRequest(obj, origin) {
   const raw = JSON.stringify(obj);
-  return { text: async () => raw };
+  return { text: async () => raw, headers: { get: (h) => (h.toLowerCase() === 'origin' ? (origin || null) : null) } };
 }
 // 1x1 png data URL (valid image input)
 const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
@@ -126,8 +126,74 @@ async function readJson(res) { return { status: res.status, body: JSON.parse(awa
 
 // 14. OPTIONS CORS
 {
-  const res = await onRequestOptions();
-  ok('OPTIONS 204 + CORS', res.status === 204 && res.headers.get('access-control-allow-origin') === '*', res.status);
+  const res = await onRequestOptions({ request: makeRequest({}, 'https://steward-organizer.pages.dev') });
+  ok('OPTIONS 204 + allows the site origin', res.status === 204 && res.headers.get('access-control-allow-origin') === 'https://steward-organizer.pages.dev', res.status);
+  const stranger = await onRequestOptions({ request: makeRequest({}, 'https://someone-else.example') });
+  ok('OPTIONS hides CORS from an unrelated origin', !stranger.headers.get('access-control-allow-origin'), stranger.headers.get('access-control-allow-origin'));
+}
+
+// 15. the writer's own department words are mapped, not dumped into Facilities
+{
+  const env = { AI: { run: async () => ({ response: JSON.stringify({ notes: 'n', transcription: 't', tasks: [
+    { title: 'Media rack', department: 'Media', priority: 'Very High', tags: [], confidence: 0.9 },
+    { title: 'F&B prep', department: 'F&B', priority: 'urgent', tags: [], confidence: 0.9 },
+    { title: 'Admin filing', department: 'Admin', priority: 'Low', tags: [], confidence: 0.9 }
+  ] }) }) } };
+  const res = await onRequestPost({ request: makeRequest({ image: TINY_PNG }), env });
+  const { body } = await readJson(res);
+  ok('Media -> Multimedia', body.tasks[0].department === 'Multimedia', body.tasks[0].department);
+  ok('Very High survives sanitising', body.tasks[0].priority === 'Very High', body.tasks[0].priority);
+  ok('F&B -> Events', body.tasks[1].department === 'Events', body.tasks[1].department);
+  ok('urgent -> Very High', body.tasks[1].priority === 'Very High', body.tasks[1].priority);
+  ok('Admin -> Administration', body.tasks[2].department === 'Administration', body.tasks[2].department);
+  ok('tags follow the real department', JSON.stringify(body.tasks[0].tags) === '["#mm"]', JSON.stringify(body.tasks[0].tags));
+}
+
+// 16. the reading brief, dictionary and correction memory reach the model
+{
+  let seen = null;
+  const env = { AI: { run: async (m, input) => { seen = input; return { response: JSON.stringify({ notes: 'n', transcription: 't', tasks: [] }) }; } } };
+  const res = await onRequestPost({
+    request: makeRequest({
+      image: TINY_PNG,
+      dictionary: [{ tag: '#fac', label: 'Facilities', meaning: 'buildings and gear' }],
+      pastorPatterns: [{ rawLine: 'pur spray (Roy)', correctedTitle: 'Pressure sprayer — Roy', edited: true }],
+      readingProfile: 'Green highlighter always means a heading.'
+    }), env
+  });
+  await readJson(res);
+  const system = String(seen?.messages?.[0]?.content || '');
+  const user = JSON.stringify(seen?.messages?.[1]?.content || '');
+  ok('custom reading profile is in the system prompt', system.includes('Green highlighter always means a heading.'), system.slice(0, 120));
+  ok('dictionary is offered to the model', user.includes('#fac'), user.slice(0, 200));
+  ok('correction memory is offered', user.includes('pur spray'), user.slice(0, 200));
+}
+
+// 17. with no profile supplied, the built-in brief is still sent
+{
+  let seen = null;
+  const env = { AI: { run: async (m, input) => { seen = input; return { response: JSON.stringify({ notes: 'n', transcription: 't', tasks: [] }) }; } } };
+  await onRequestPost({ request: makeRequest({ image: TINY_PNG }), env });
+  const system = String(seen?.messages?.[0]?.content || '');
+  ok('built-in brief covers struck-through lines', /struck-through|scribbled out/i.test(system), system.slice(0, 120));
+  ok('built-in brief covers Taglish', /Taglish|bugbog|napahiya/i.test(system), '');
+  ok('built-in brief covers the green highlighter', /highlighter/i.test(system), '');
+}
+
+// 18. GET publishes the built-in brief so the editor cannot drift from it
+{
+  const res = await onRequestGet({ request: makeRequest({}) });
+  const { status, body } = await readJson(res);
+  ok('GET returns the built-in brief', status === 200 && typeof body.readingProfile === 'string' && body.readingProfile.length > 500, status);
+}
+
+// 19. a plain-text reading keeps his own #hashtags instead of forcing #fac
+{
+  const env = { AI: { run: async () => ({ response: 'Hazel plug 2x ? - #events. Check the front-back fan before the weekend service.' }) } };
+  const res = await onRequestPost({ request: makeRequest({ image: TINY_PNG }), env });
+  const { status, body } = await readJson(res);
+  const tagged = (body.tasks || []).find(t => Array.isArray(t.tags) && t.tags.some(x => String(x).includes('events')));
+  ok('plain text keeps the written hashtag', status === 200 && !!tagged, JSON.stringify(body).slice(0, 300));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

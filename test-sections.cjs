@@ -1,5 +1,5 @@
 const fs = require('fs');
-const html = fs.readFileSync('C:\\Users\\ORAS Intern\\AppData\\Local\\Temp\\opencode\\steward-repo\\index.html', 'utf8');
+const html = fs.readFileSync(require('path').join(__dirname,'index.html'), 'utf8');
 const i0 = html.indexOf('const VALID_SECTIONS=');
 const i1 = html.indexOf('function filteredTasks(){', i0);
 if (i0 < 0 || i1 < 0) { console.log('FAIL extract'); process.exit(1); }

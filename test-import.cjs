@@ -1,5 +1,5 @@
 const fs = require('fs');
-const html = fs.readFileSync('C:\\Users\\ORAS Intern\\AppData\\Local\\Temp\\opencode\\steward-repo\\index.html', 'utf8');
+const html = fs.readFileSync(require('path').join(__dirname,'index.html'), 'utf8');
 // stub browser env
 const store = {};
 global.localStorage = { getItem: k => store[k] ?? null, setItem: (k,v) => { store[k]=String(v); }, removeItem: k => { delete store[k]; } };
